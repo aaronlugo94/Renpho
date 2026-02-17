@@ -14,23 +14,20 @@ import traceback
 from datetime import datetime, timedelta
 from collections import Counter
 
-# --- CONFIGURACIÓN v86.0 (HYBRID ELITE: TOP 5 + CUPS) ---
+# --- CONFIGURACIÓN v86.1 (WIN-FIRST ELITE) ---
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-RUN_TIME = "02:43" 
+RUN_TIME = "02:50" 
 
-# AJUSTES DE MODELO (HYBRID MODE)
+# AJUSTES DE MODELO
 SIMULATION_RUNS = 20000 
 DECAY_ALPHA = 0.88          
-MIN_EV_THRESHOLD = 0.01 # Bajamos EV mínimo porque priorizamos Probabilidad
-MIN_ODD_THRESHOLD = 1.45 # (Aprox -220). Menos de esto no vale la pena el riesgo.
 SEASON = '2526'
 
 # --- 🏆 MANUAL MATCHES (CHAMPIONS/EUROPA) 🏆 ---
-# Escribe aquí los partidos de Copa. El bot los analizará SIEMPRE, sin importar la liga.
 MANUAL_MATCHES = [
     ('Galatasaray', 'Juventus'),
     ('Dortmund', 'Atalanta'),
@@ -48,35 +45,29 @@ if os.path.exists(VOLUME_PATH):
 else:
     HISTORY_FILE = "historial_omni_v86.csv"
 
-# GESTIÓN DE RIESGO
-KELLY_FRACTION = 0.20        
-MAX_STAKE_PCT = 0.05 # Subimos un poco el max stake ya que buscamos apuestas más seguras
+# GESTIÓN DE RIESGO (MODO CONSERVADOR)
+MAX_STAKE_PCT = 0.03 # Tope máximo 3% (Stake Plano)
 
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 ]
 
-# --- FILTRO VIP: SOLO ESTAS LIGAS SE REPORTAN EN TELEGRAM ---
+# --- FILTRO VIP: SOLO ESTAS LIGAS SE REPORTAN ---
 TOP_5_LEAGUES = ['E0', 'SP1', 'I1', 'D1', 'F1']
 
-# CONFIGURACIÓN DE LIGAS (El bot lee TODAS para tener datos, pero filtra al final)
+# CONFIGURACIÓN DE LIGAS (Todas activas para data, filtro al final)
 LEAGUE_CONFIG = {
-    # TOP 5 (Se reportan)
     'E0':  {'name': '🇬🇧 PREMIER', 'tier': 1.00, 'm_weight': 0.85},
     'SP1': {'name': '🇪🇸 LA LIGA', 'tier': 1.00, 'm_weight': 0.85},
     'I1':  {'name': '🇮🇹 SERIE A', 'tier': 1.00, 'm_weight': 0.82},
     'D1':  {'name': '🇩🇪 BUNDES',  'tier': 1.00, 'm_weight': 0.82},
     'F1':  {'name': '🇫🇷 LIGUE 1', 'tier': 0.90, 'm_weight': 0.80},
-    
-    # SECUNDARIAS (Solo para datos internos y Copas)
     'P1':  {'name': '🇵🇹 PORTUGAL','tier': 0.85, 'm_weight': 0.70},
     'N1':  {'name': '🇳🇱 HOLANDA', 'tier': 0.85, 'm_weight': 0.70},
     'B1':  {'name': '🇧🇪 BELGICA', 'tier': 0.80, 'm_weight': 0.65},
     'T1':  {'name': '🇹🇷 TURQUIA', 'tier': 0.75, 'm_weight': 0.60},
     'G1':  {'name': '🇬🇷 GRECIA',  'tier': 0.70, 'm_weight': 0.60},
     'SC0': {'name': '🏴󠁧󠁢󠁳󠁣󠁴󠁿 ESCOCIA', 'tier': 0.70, 'm_weight': 0.60},
-    
-    # COPAS
     'EU_CUP': {'name': '🏆 COPA EUROPA', 'tier': 1.00, 'm_weight': 0.50} 
 }
 
@@ -94,8 +85,8 @@ class OmniHybridBot:
         self.handicap_buffer = [] 
         self.global_db = {} 
         
-        print("--- ENGINE v86.0 HYBRID ELITE STARTED ---", flush=True)
-        self.send_msg(f"🔧 <b>INICIANDO v86.0</b>\n(Top 5 Leagues Only + Min Odd 1.45)\n📂 CSV: {HISTORY_FILE}")
+        print("--- ENGINE v86.1 WIN-FIRST STARTED ---", flush=True)
+        self.send_msg(f"🔧 <b>INICIANDO v86.1</b>\n(Estrategia: Win-First / Flat Stake)\n📂 CSV: {HISTORY_FILE}")
         self._init_history_file()
         
         self.ai_client = None
@@ -290,81 +281,77 @@ class OmniHybridBot:
             'BTTS_Y': get_avg(['BbAvBBTS', 'B365BTTSY'])
         }
 
-    # --- ESTRATEGIA HYBRID WIN-FIRST ---
+    # --- 🧠 LÓGICA WIN-FIRST (AQUÍ ESTÁ LA MAGIA) ---
     def find_best_value(self, sim, odds, min_ev_league):
         candidates = []
-        handicap_candidates = []
         
         def add(name, market, prob, odd, gcs=None):
-            # 1. FILTRO DE ODDS (Min 1.45)
-            if odd < MIN_ODD_THRESHOLD: return 
+            # 1. FILTRO DE ODDS (Seguridad Primero)
+            # Descartamos basura (<1.45) y loterías (>2.20)
+            if odd < 1.45 or odd > 2.20: return 
             
-            ev = (prob * odd) - 1
-            status = "VALID"; reason = "OK"
-            
-            # 2. SCORE HÍBRIDO (Probabilidad manda)
-            # Damos mucho peso a que la probabilidad sea alta (>50%)
-            # Score = (Prob * 100) + (EV * 50) 
-            score = (prob * 100) + (ev * 50)
-            
-            # Filtros de rechazo
-            if ev < min_ev_league: status="REJECTED"; reason="EV Bajo"
-            elif prob < 0.40: status="REJECTED"; reason="Riesgo Alto" # Subimos el piso de probabilidad
-            elif ev > 0.45: status="REJECTED"; reason="Error Modelo"
-            
-            if market == 'GOALS':
-                if gcs < 55: status="REJECTED"; reason="GCS Bajo"
-                elif prob > 0.65 or prob < 0.35: status="REJECTED"; reason="Prob Extrema"
+            # 2. FILTRO DE PROBABILIDAD (Win Rate)
+            # Si no hay 55% de chance real, no interesa el EV.
+            if prob < 0.55: return
 
-            if market == "HANDI": status = "BACKUP"; reason = "Reserva Parlay"
+            ev = (prob * odd) - 1
             
-            # Boost a mercados seguros (DC, DNB)
-            if market in ['Double Chance', 'DNB']: score *= 1.15
+            # 3. FILTRO DE MERCADO (Jerarquía)
+            # Penalizamos ML si no es "fijo". Premiamos DNB/DC.
+            if market == "1X2" and prob < 0.60: return
+            if market == "GOALS" and (not gcs or gcs < 60): return
+
+            # 4. SCORING HÍBRIDO
+            # Probabilidad pesa el doble que el EV.
+            score = (prob * 100)
+            if market in ["DNB", "Double Chance"]: score += 5 # Bono seguridad
             
-            item = {'pick': name, 'market': market, 'prob': prob, 'odd': odd, 'ev': ev, 'score': score, 'status': status, 'reason': reason, 'gcs': gcs}
+            # Validación EV (Solo para no agarrar valor negativo profundo)
+            if ev < -0.03: return # Permitimos EV levemente negativo si es DNB muy seguro
             
-            if market == "HANDI": handicap_candidates.append(item)
-            else: candidates.append(item)
+            item = {'pick': name, 'market': market, 'prob': prob, 'odd': odd, 'ev': ev, 'score': score, 'status': "VALID", 'reason': "WIN-FIRST", 'gcs': gcs}
+            candidates.append(item)
 
         if odds['H'] > 0:
+            add("DNB HOME", "DNB", sim['dnb'][0], (odds['H'] * (1 - (1/odds['D']))) * 0.95)
+            add("DNB AWAY", "DNB", sim['dnb'][1], (odds['A'] * (1 - (1/odds['D']))) * 0.95)
+            add("DC 1X", "Double Chance", sim['dc'][0], 1 / ((1/odds['H']) + (1/odds['D'])) * 0.95)
+            add("DC X2", "Double Chance", sim['dc'][1], 1 / ((1/odds['A']) + (1/odds['D'])) * 0.95)
             add("GANA HOME", "1X2", sim['1x2'][0], odds['H'])
             add("GANA AWAY", "1X2", sim['1x2'][2], odds['A'])
-            add("DNB HOME", "DNB", sim['dnb'][0], (odds['H'] * (1 - (1/odds['D']))) * 0.94)
-            add("DNB AWAY", "DNB", sim['dnb'][1], (odds['A'] * (1 - (1/odds['D']))) * 0.94)
-            add("DC 1X", "Double Chance", sim['dc'][0], 1 / ((1/odds['H']) + (1/odds['D'])) * 0.94)
-            add("DC X2", "Double Chance", sim['dc'][1], 1 / ((1/odds['A']) + (1/odds['D'])) * 0.94)
         if odds['O25'] > 0:
             add("OVER 2.5 GOLES", "GOALS", sim['goals'][0], odds['O25'], sim['gcs'])
             add("UNDER 2.5 GOLES", "GOALS", 1-sim['goals'][0], 1 / (1 - (1/odds['O25'] * 1.05)), sim['gcs'])
         if odds['BTTS_Y'] > 0:
             add("BTTS SÍ", "BTTS", sim['goals'][1], odds['BTTS_Y'])
-            add("BTTS NO", "BTTS", 1-sim['goals'][1], 1 / (1 - (1/odds['BTTS_Y']*1.05)))
         
+        # Handicaps son solo secundarios ahora, no los mezclamos en candidates principales
         ah_h_plus = sim['ah'][2]; ah_a_plus = sim['ah'][3]
-        if ah_h_plus > 0.90: add("HANDICAP H +1.5", "HANDI", ah_h_plus, 1.15)
-        if ah_a_plus > 0.90: add("HANDICAP A +1.5", "HANDI", ah_a_plus, 1.15)
+        best_handi = None
+        if ah_h_plus > 0.85: best_handi = {'pick': "HANDICAP H +1.5", 'odd': 1.15}
+        elif ah_a_plus > 0.85: best_handi = {'pick': "HANDICAP A +1.5", 'odd': 1.15}
 
-        best_handi = sorted(handicap_candidates, key=lambda x: x['score'], reverse=True)[0] if handicap_candidates else None
+        if not candidates: return None, best_handi
         
-        principales = [c for c in candidates if c['status'] == "VALID"]
-        if principales:
-            principales.sort(key=lambda x: x['score'], reverse=True)
-            return principales[0], best_handi
-        
+        # Ordenamos por SCORE (Probabilidad), no por EV
         candidates.sort(key=lambda x: x['score'], reverse=True)
-        return candidates[0] if candidates else None, best_handi
+        return candidates[0], best_handi
 
+    # --- STAKE PLANO ESCALONADO ---
     def get_kelly_stake(self, prob, odds, market, gcs=None):
-        if odds <= 1.0: return 0.0
-        q = 1 - prob; b = odds - 1
-        full = (b * prob - q) / b
-        stake = full * KELLY_FRACTION
-        if market in ['GOALS', 'BTTS'] and gcs:
-            confidence = min(1.0, gcs / 75)
-            stake *= confidence
-        # Stake boost para alta probabilidad (>60%)
-        if prob > 0.60: stake *= 1.2
-        return max(0.0, min(stake, MAX_STAKE_PCT))
+        # Base: 1.5% del bank
+        stake = 0.015
+        
+        # Tier 1: Probabilidad alta (>65%) -> Subimos a 2.0%
+        if prob > 0.65: stake = 0.02
+        
+        # Tier 2: Probabilidad muy alta (>75%) -> Subimos a 2.5%
+        if prob > 0.75: stake = 0.025
+        
+        # Penalización volatilidad
+        if market in ['GOALS', 'BTTS']: stake *= 0.80
+        
+        return min(stake, MAX_STAKE_PCT)
 
     def get_team_form_icon(self, df, team):
         matches = df[(df['HomeTeam'] == team) | (df['AwayTeam'] == team)].tail(5)
@@ -483,12 +470,11 @@ class OmniHybridBot:
         if matches: return self.global_db[matches[0]], matches[0]
         return None, None
 
-    # --- OUTPUT PROCESSOR (TOP 5 FILTER) ---
+    # --- OUTPUT PROCESSOR (TOP 5 + COPA) ---
     def process_match_output(self, div, rh, ra, data, sim, best_bet, best_handi, today):
-        # FILTRO DE SILENCIO: Si no es TOP 5 y no es Copa, no enviamos nada
+        # Filtro de Silencio: Si NO es Copa Y NO es Top 5, ignoramos.
         is_cup = (div == 'EU_CUP')
         if not is_cup and div not in TOP_5_LEAGUES:
-            # Aún guardamos en CSV para historial, pero return antes del mensaje
             return 
             
         if not best_bet: return
@@ -556,7 +542,7 @@ class OmniHybridBot:
         self.daily_picks_buffer = [] 
         self.handicap_buffer = []
         today = datetime.now().strftime('%d/%m/%Y')
-        print(f"🚀 Iniciando v86.0 HYBRID ELITE: {today}", flush=True)
+        print(f"🚀 Iniciando v86.1 WIN-FIRST: {today}", flush=True)
         
         print("🌍 Cargando DB Global...", flush=True)
         for div in LEAGUE_CONFIG:
@@ -574,7 +560,7 @@ class OmniHybridBot:
                 target_date = pd.to_datetime(today, dayfirst=True)
                 daily = df[(df['Date'] >= target_date) & (df['Date'] <= target_date + timedelta(days=1))]
                 
-                self.send_msg(f"🔎 <b>Analizando {len(daily)} partidos... (Filtro Top 5 + Copas)</b>")
+                self.send_msg(f"🔎 <b>Analizando {len(daily)} partidos domésticos...</b>")
                 for idx, row in daily.iterrows():
                     div = row.get('Div')
                     if div not in LEAGUE_CONFIG: continue
@@ -588,6 +574,7 @@ class OmniHybridBot:
                     m_weight = LEAGUE_CONFIG[div].get('m_weight', 0.70)
                     sim = self.simulate_match(rh, ra, data, m_odds, m_weight)
                     min_ev = LEAGUE_CONFIG[div].get('min_ev', 0.02)
+                    # Min EV League lo pasamos, pero dentro de find_best_value tenemos nuestra lógica Win-First
                     best_bet, best_handi = self.find_best_value(sim, m_odds, min_ev)
                     self.process_match_output(div, rh, ra, data, sim, best_bet, best_handi, today)
         except: pass
@@ -614,7 +601,6 @@ class OmniHybridBot:
                         'H': 1/ph if ph>0 else 0, 'D': 1/pd if pd>0 else 0, 'A': 1/pa if pa>0 else 0,
                         'O25': 1/p_o25 if p_o25>0 else 0, 'BTTS_Y': 1/p_btts if p_btts>0 else 0
                     }
-                    # Usamos min_ev -100 para forzar output aunque odds sean dummy
                     best_bet, best_handi = self.find_best_value(sim, fair_odds, -100)
                     self.process_match_output('EU_CUP', real_h, real_a, hybrid_data, sim, best_bet, best_handi, today)
 
