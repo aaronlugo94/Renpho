@@ -1,6 +1,3 @@
-pandas
-numpy
+renpho-api
+google-generativeai
 requests
-scipy
-schedule
-google-genai
