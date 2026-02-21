@@ -2,12 +2,11 @@ import os
 import json
 import requests
 import pytz
-import inspect
 from datetime import datetime, timedelta
 
 # Nuevas librerías
 from google import genai
-import renpho
+from renpho.renpho import Renpho # 🔥 La ruta exacta a la clase
 
 # ==========================================
 # 0. CONFIGURACIÓN BASE Y LOGGING
@@ -40,26 +39,11 @@ if not all(env_vars.values()):
 def sanitizar_markdown(texto):
     return texto.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
 
-def obtener_clase_renpho():
-    """Escanea el módulo instalado buscando la clase principal de Renpho."""
-    # Intentos directos comunes
-    if hasattr(renpho, 'RenphoWeight'): return renpho.RenphoWeight
-    if hasattr(renpho, 'RenphoApi'): return renpho.RenphoApi
-    
-    # Escaneo dinámico: buscar cualquier clase que tenga 'renpho' en su nombre
-    for nombre, obj in inspect.getmembers(renpho, inspect.isclass):
-        if 'renpho' in nombre.lower():
-            log(f"🔍 Clase detectada automáticamente: {nombre}")
-            return obj
-            
-    # Si todo falla, extraemos el árbol para leerlo en Railway
-    raise RuntimeError(f"❌ No encontré la clase. Contenido real de renpho: {dir(renpho)}")
-
 def obtener_datos_renpho():
     log("🔄 Extrayendo datos de Renpho...")
     try:
-        RenphoClient = obtener_clase_renpho()
-        cliente = RenphoClient(env_vars["RENPHO_EMAIL"], env_vars["RENPHO_PASSWORD"])
+        # Iniciar sesión directamente con la clase correcta
+        cliente = Renpho(env_vars["RENPHO_EMAIL"], env_vars["RENPHO_PASSWORD"])
         mediciones = cliente.get_measurements()
         
         if not mediciones:
