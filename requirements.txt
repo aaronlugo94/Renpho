@@ -1,4 +1,6 @@
-renpho-api
-google-genai
+pandas
 requests
 pytz
+Renpho-api
+google-genai
+google-generativeai
