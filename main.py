@@ -43,26 +43,54 @@ def sanitizar_markdown(texto):
     return texto
 
 def obtener_datos_renpho():
-    log("🔄 Ejecutando sonda de diagnóstico en RenphoClient...")
+    log("🔄 Extrayendo datos de Renpho...")
     try:
-        # Iniciamos sesión
         cliente = RenphoClient(env_vars["RENPHO_EMAIL"], env_vars["RENPHO_PASSWORD"])
+        mediciones = None
         
-        # Escaneamos las entrañas del cliente
-        metodos = [m for m in dir(cliente) if callable(getattr(cliente, m)) and not m.startswith('_')]
-        propiedades = [m for m in dir(cliente) if not callable(getattr(cliente, m)) and not m.startswith('_')]
+        # 🟢 Intento 1: La función que no debería pedir argumentos
+        try:
+            mediciones = cliente.get_all_measurements()
+        except Exception as e:
+            log(f"get_all_measurements() falló: {e}. Pasando a Intento 2...")
+            
+        # 🟡 Intento 2: Armamos los argumentos manualmente
+        if not mediciones:
+            user_id = cliente.user_id
+            devices = cliente.get_device_info()
+            
+            # Generalmente el table_name es la MAC del dispositivo o está dentro de get_device_info
+            try:
+                # Tomamos la MAC del primer dispositivo encontrado
+                if isinstance(devices, list) and len(devices) > 0:
+                    mac_dispositivo = devices[0].get('mac', '')
+                    mediciones = cliente.get_measurements(table_name=mac_dispositivo, user_id=user_id, total_count=10)
+                else:
+                    raise ValueError("No se encontraron dispositivos asociados a la cuenta.")
+            except Exception as e2:
+                # Si esto falla, mandamos los datos a Telegram para ver el table_name real
+                raise RuntimeError(f"Fallo al extraer.\nuser_id: `{user_id}`\ndevices: `{devices}`")
+
+        # --- Fin de la extracción ---
+
+        if not mediciones:
+            raise ValueError("La API devolvió una lista vacía de mediciones.")
+
+        # Ordenar explícitamente por timestamp
+        mediciones = sorted(mediciones, key=lambda x: x.get("time_stamp", 0), reverse=True)
+        ultima = mediciones[0]
         
-        # Armamos un reporte y forzamos un error para que llegue a Telegram
-        diagnostico = (
-            f"🔍 *Diagnóstico de la API:*\n\n"
-            f"🛠️ *Métodos:* `{metodos}`\n\n"
-            f"📦 *Propiedades:* `{propiedades}`"
-        )
-        raise ValueError(diagnostico)
+        peso = ultima.get("weight")
+        grasa = ultima.get("bodyfat") or ultima.get("fat") 
+        musculo = ultima.get("muscle")
+
+        if peso is None or grasa is None or musculo is None:
+            raise ValueError(f"Medición incompleta: Peso={peso}, Grasa={grasa}, Músculo={musculo}\nRaw: {ultima}")
+
+        return round(peso, 2), round(grasa, 2), round(musculo, 2)
 
     except Exception as e:
-        # Lo pasamos hacia arriba para que el main lo envíe
-        raise RuntimeError(f"{e}")
+        raise RuntimeError(f"Fallo crítico en Renpho: {e}")
 
 def manejar_historial(peso, grasa, musculo):
     directorio_volumen = "/app/data"
@@ -155,7 +183,6 @@ def enviar_telegram(mensaje):
 
 def main():
     try:
-        # Esto va a "fallar" a propósito para darnos el diagnóstico
         peso, grasa, musculo = obtener_datos_renpho()
         
         datos_ayer, ya_existia = manejar_historial(peso, grasa, musculo)
@@ -179,8 +206,7 @@ def main():
         log("✅ Pipeline completado exitosamente.")
 
     except Exception as e:
-        # El error de diagnóstico caerá aquí y te llegará por Telegram
-        error_msg = f"🔴 *Diagnóstico del Sistema*\n{str(e)}"
+        error_msg = f"🔴 *Falla en Sistema de Salud*\nError: `{str(e)}`"
         log(error_msg)
         try:
             enviar_telegram(error_msg)
