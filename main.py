@@ -2,6 +2,7 @@ import os
 import json
 import requests
 import pytz
+import inspect
 from datetime import datetime, timedelta
 
 # Nuevas librerías
@@ -40,20 +41,19 @@ def sanitizar_markdown(texto):
     return texto.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
 
 def obtener_clase_renpho():
-    """Busca dinámicamente la clase correcta dentro del paquete instalado."""
+    """Escanea el módulo instalado buscando la clase principal de Renpho."""
+    # Intentos directos comunes
     if hasattr(renpho, 'RenphoWeight'): return renpho.RenphoWeight
-    if hasattr(renpho, 'Renpho'): return renpho.Renpho
-    if hasattr(renpho, 'RenphoAPI'): return renpho.RenphoAPI
+    if hasattr(renpho, 'RenphoApi'): return renpho.RenphoApi
     
-    # Si está en un submódulo (muy común en PyPI)
-    try:
-        from renpho.renpho import Renpho
-        return Renpho
-    except ImportError:
-        pass
-        
-    # Si falla todo, explotamos con gracia e imprimimos el contenido de la librería
-    raise RuntimeError(f"Clase no encontrada. Contenido del módulo renpho: {dir(renpho)}")
+    # Escaneo dinámico: buscar cualquier clase que tenga 'renpho' en su nombre
+    for nombre, obj in inspect.getmembers(renpho, inspect.isclass):
+        if 'renpho' in nombre.lower():
+            log(f"🔍 Clase detectada automáticamente: {nombre}")
+            return obj
+            
+    # Si todo falla, extraemos el árbol para leerlo en Railway
+    raise RuntimeError(f"❌ No encontré la clase. Contenido real de renpho: {dir(renpho)}")
 
 def obtener_datos_renpho():
     log("🔄 Extrayendo datos de Renpho...")
@@ -63,7 +63,7 @@ def obtener_datos_renpho():
         mediciones = cliente.get_measurements()
         
         if not mediciones:
-            raise ValueError("La API de Renpho devolvió una lista vacía de mediciones.")
+            raise ValueError("La API devolvió una lista vacía.")
 
         mediciones = sorted(mediciones, key=lambda x: x.get("time_stamp", 0), reverse=True)
         ultima = mediciones[0]
@@ -117,7 +117,7 @@ def manejar_historial(peso, grasa, musculo):
     return datos_ayer
 
 def analizar_con_ia(peso, grasa, musculo, datos_ayer):
-    log("🧠 Ejecutando prompt determinista en Gemini (Nuevo SDK)...")
+    log("🧠 Ejecutando prompt en Gemini (Nuevo SDK)...")
     client = genai.Client(api_key=env_vars["GOOGLE_API_KEY"])
     
     comparativa = ""
@@ -151,7 +151,7 @@ def analizar_con_ia(peso, grasa, musculo, datos_ayer):
 
 def enviar_telegram(mensaje):
     if DRY_RUN:
-        log(f"🛑 DRY_RUN ACTIVO. Simulando envío a Telegram:\n{mensaje}")
+        log(f"🛑 DRY_RUN ACTIVO:\n{mensaje}")
         return
 
     log("📲 Transmitiendo a Telegram...")
