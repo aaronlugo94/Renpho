@@ -1,4 +1,4 @@
-renpho-api
-google-generativeai
+renpho-weight
+google-genai
 requests
 pytz
