@@ -1,4 +1,3 @@
 renpho-api
 google-generativeai
 requests
-pandas
