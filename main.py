@@ -3,13 +3,15 @@ import json
 import requests
 import pytz
 from datetime import datetime, timedelta
-import google.generativeai as genai
-from renpho import Renpho
+
+# Importaciones corregidas para las nuevas librerías
+from google import genai
+from renpho_weight import RenphoWeight
 
 # ==========================================
 # 0. CONFIGURACIÓN BASE Y LOGGING
 # ==========================================
-TZ = pytz.timezone("America/Phoenix") # Zona horaria blindada para Arizona (Tucson/Phoenix)
+TZ = pytz.timezone("America/Phoenix") # Zona horaria blindada (Tucson/Phoenix)
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
 
 def log(msg):
@@ -42,9 +44,8 @@ def sanitizar_markdown(texto):
 def obtener_datos_renpho():
     log("🔄 Extrayendo datos de Renpho...")
     try:
-        # Nota: renpho-api actualmente no expone timeout en su constructor de forma estándar, 
-        # pero la conexión base delega a requests. Si falla, el try/except global lo atrapará.
-        cliente = Renpho(env_vars["RENPHO_EMAIL"], env_vars["RENPHO_PASSWORD"])
+        # Usamos la clase correcta del nuevo paquete renpho-weight
+        cliente = RenphoWeight(env_vars["RENPHO_EMAIL"], env_vars["RENPHO_PASSWORD"])
         mediciones = cliente.get_measurements()
         
         if not mediciones:
@@ -54,12 +55,13 @@ def obtener_datos_renpho():
         mediciones = sorted(mediciones, key=lambda x: x.get("time_stamp", 0), reverse=True)
         ultima = mediciones[0]
         
+        # Ojo: renpho-weight usa 'bodyfat' en lugar de 'fat' a veces
         peso = ultima.get("weight")
-        grasa = ultima.get("fat")
+        grasa = ultima.get("bodyfat") or ultima.get("fat") 
         musculo = ultima.get("muscle")
 
         if peso is None or grasa is None or musculo is None:
-            raise ValueError(f"Medición incompleta: Peso={peso}, Grasa={grasa}, Músculo={musculo}")
+            raise ValueError(f"Medición incompleta detectada: Peso={peso}, Grasa={grasa}, Músculo={musculo}\nData raw: {ultima}")
 
         return round(peso, 2), round(grasa, 2), round(musculo, 2)
 
@@ -92,7 +94,7 @@ def manejar_historial(peso, grasa, musculo):
 
     # 3. Idempotencia: Proteger contra doble ejecución el mismo día
     if hoy in data:
-        log("ℹ️ Ya existe una medición para hoy, protegiendo datos y omitiendo sobreescritura.")
+        log("ℹ️ Ya existe una medición para hoy, omitiendo escritura para proteger datos.")
         return datos_ayer
 
     # 4. Guardar datos de hoy
@@ -112,9 +114,10 @@ def manejar_historial(peso, grasa, musculo):
     return datos_ayer
 
 def analizar_con_ia(peso, grasa, musculo, datos_ayer):
-    log("🧠 Ejecutando prompt determinista en Gemini...")
-    genai.configure(api_key=env_vars["GOOGLE_API_KEY"])
-    modelo = genai.GenerativeModel('gemini-1.5-flash')
+    log("🧠 Ejecutando prompt determinista en Gemini (Nuevo SDK)...")
+    
+    # Nueva sintaxis obligatoria de Google GenAI
+    client = genai.Client(api_key=env_vars["GOOGLE_API_KEY"])
     
     comparativa = ""
     if datos_ayer:
@@ -137,7 +140,11 @@ def analizar_con_ia(peso, grasa, musculo, datos_ayer):
     """
     
     try:
-        respuesta = modelo.generate_content(prompt)
+        # Nueva forma de llamar al modelo
+        respuesta = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt
+        )
         return respuesta.text.strip()
     except Exception as e:
         raise RuntimeError(f"Fallo en generación de IA: {e}")
