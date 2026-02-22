@@ -46,9 +46,17 @@ def actualizar_estado(ruta_db, nuevo_mult):
 def enviar_mensaje_telegram(mensaje):
     if DRY_RUN: return logging.info(f"DRY RUN: {mensaje}")
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    for parte in [mensaje[i:i+4000] for i in range(0, len(mensaje), 4000)]:
-        try: requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": parte, "parse_mode": "HTML"})
-        except Exception as e: logging.error(f"Error Telegram: {e}")
+    
+    # Evitamos cortar etiquetas HTML por la mitad. 
+    # Telegram soporta 4096, cortamos de forma segura en 4000.
+    texto_seguro = mensaje if len(mensaje) < 4000 else mensaje[:3900] + "\n\n[... Menú truncado por Telegram ...]"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texto_seguro, "parse_mode": "HTML"}
+    
+    res = requests.post(url, json=payload)
+    if res.status_code != 200:
+        logging.error(f"⚠️ Error HTML en Telegram: {res.text}. Enviando texto plano...")
+        payload["parse_mode"] = None # Apaga el validador estricto
+        requests.post(url, json=payload)
 
 # ==========================================
 # LEYES DE CONTROL (MIMO SHADOW & SISO ACTIVO)
