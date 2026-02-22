@@ -59,7 +59,7 @@ def enviar_mensaje_telegram(mensaje):
         del payload["parse_mode"]  # <-- Esta es la forma correcta y blindada de quitarlo
         res2 = requests.post(url, json=payload)
         if res2.status_code != 200:
-            logging.error(f"⚠️ Error CRÍTICO en fallback: {res2.text}"))
+            logging.error(f"⚠️ Error CRÍTICO en fallback: {res2.text}")
 
 # ==========================================
 # LEYES DE CONTROL (MIMO SHADOW & SISO ACTIVO)
