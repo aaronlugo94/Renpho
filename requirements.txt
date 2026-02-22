@@ -3,4 +3,3 @@ requests
 pytz
 Renpho-api
 google-genai
-google-generativeai
