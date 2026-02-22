@@ -55,7 +55,6 @@ def enviar_mensaje_telegram(mensaje):
         if len(mensaje) <= 3900:
             partes.append(mensaje)
             break
-        # Cortar en el último párrafo para no romper etiquetas HTML
         corte = mensaje.rfind('\n\n', 0, 3900)
         if corte == -1: corte = mensaje.rfind('\n', 0, 3900)
         if corte == -1: corte = 3900
@@ -124,10 +123,14 @@ def ejecutar_job():
     
     peso_actual, grasa_actual = float(dato_actual['Peso_kg']), float(dato_actual['Grasa_Porcentaje'])
     fat_free_weight = float(dato_actual['FatFreeWeight'])
+    musculo_actual = float(dato_actual['Musculo'])
+    agua_actual = float(dato_actual['Agua'])
+    visfat_actual = float(dato_actual['VisFat'])
+    edad_metabolica = int(dato_actual['EdadMetabolica'])
     
     delta_peso = peso_actual - float(dato_anterior['Peso_kg'])
     delta_grasa = grasa_actual - float(dato_anterior['Grasa_Porcentaje'])
-    delta_musculo = float(dato_actual['Musculo']) - float(dato_anterior['Musculo'])
+    delta_musculo = musculo_actual - float(dato_anterior['Musculo'])
     
     kcal_mult_actual = obtener_estado_actual(ARCHIVO_DB)
 
@@ -147,17 +150,17 @@ def ejecutar_job():
     grasas = round(peso_actual * 0.7) 
     carbs = max(0, round((calorias - (proteina * 4 + grasas * 9)) / 4))
 
-    prompt = f"""Eres mi nutriólogo deportivo. Diseña un plan de comidas de 7 días.
-    Perfil: Peso: {peso_actual}kg | Grasa: {grasa_actual}% (Visceral: {dato_actual['VisFat']}) | Agua: {dato_actual['Agua']}% | FFM: {fat_free_weight}kg.
+    # === EL NUEVO CEREBRO: Nutriólogo + Entrenador ===
+    prompt = f"""Eres mi nutriólogo deportivo y entrenador personal. Diseña un plan de 7 días.
+    Perfil: Peso: {peso_actual}kg | Grasa: {grasa_actual}% (Visceral: {visfat_actual}) | Agua: {agua_actual}% | FFM: {fat_free_weight}kg.
     Macros diarios: Kcal: {calorias} | P: {proteina}g | C: {carbs}g | G: {grasas}g.
-    Nota: Grasa visceral en {dato_actual['VisFat']}. Prioriza omega 3 y antiinflamatorios.
 
     REGLAS DE ESTILO DE VIDA (ESTRICTAS):
-    1. LUNES, MIERCOLES Y JUEVES (Oficina y Gym Pesado): Salgo 4pm, entreno 45 min en gym, ceno 6pm. Cenas deben ser muy saciantes. El lonche es SIEMPRE la sobra de la cena anterior.
-    2. MARTES Y VIERNES (Home Office y Bebé): Entreno en casa 30 min de alta intensidad aprovechando las siestas del bebé.
-    3. FIN DE SEMANA: Actividad ligera o descanso activo.
+    1. LUNES, MIERCOLES Y JUEVES (Oficina y Gym Pesado): Salgo 4pm, entreno 45 min en gym, ceno 6pm. Cenas deben ser saciantes. El lonche es SIEMPRE la sobra de la cena anterior.
+    2. MARTES Y VIERNES (Home Office y Bebé): Entreno en casa 30 min aprovechando la siesta del bebé. DAME UNA SUGERENCIA DE RUTINA/EJERCICIO EXACTO PARA ESTOS 30 MINUTOS EN CASA.
+    3. FIN DE SEMANA: Sugiéreme un tiempo activo o actividad de recuperación.
     4. Desayunos: Ultra-rápidos (<5 mins) y portátiles para comer en el auto camino a la oficina.
-    5. Pre-entreno: Snack rápido de energía a las 3:30 PM.
+    5. Snacks/Frutas: INCLUYE SIEMPRE 1 colación al día basada en FRUTAS FRESCAS para controlar antojos y dar vitaminas, ajustando las porciones de la cena para no pasarnos de calorías.
     
     REGLA ESTRICTA DE FORMATO: Usa SOLO etiquetas <b> e <i> para resaltar. Usa saltos de línea reales (\\n) y guiones (-) para listas. PROHIBIDO usar <br>, <hr>, <ul>, <li> o cualquier otra etiqueta HTML."""
     
@@ -170,17 +173,23 @@ def ejecutar_job():
     except Exception as e:
         return enviar_mensaje_telegram("⚠️ Error al contactar IA para generar menú.")
 
+    # === EL NUEVO DASHBOARD ===
     mensaje_telegram = (
         f"🤖 <b>CONTROL METABÓLICO V4.0</b> 🤖\n\n"
-        f"📊 <b>Telemetría Semanal:</b>\n"
+        f"📊 <b>Telemetría Semanal Completa:</b>\n"
         f"• Peso: {peso_actual:.1f} kg (Δ {delta_peso:+.2f} kg)\n"
-        f"• FFM: {fat_free_weight:.1f} kg\n\n"
+        f"• Grasa: {grasa_actual:.1f}% (Δ {delta_grasa:+.2f} %)\n"
+        f"• Músculo: {musculo_actual:.1f}% (Δ {delta_musculo:+.2f} %)\n"
+        f"• Masa Libre de Grasa (FFM): {fat_free_weight:.1f} kg\n"
+        f"• Agua Corporal: {agua_actual:.1f}%\n"
+        f"• Grasa Visceral: {visfat_actual}\n"
+        f"• Edad Metabólica: {edad_metabolica} años\n\n"
         f"🧠 <b>Acción del Sistema (SISO):</b>\n"
         f"<i>{razon_control}</i>\n"
         f"Multiplicador actual: {nuevo_mult} kcal/kg\n\n"
         f"🎯 <b>Macros Bio-Ajustados:</b>\n"
         f"Kcal: {calorias} | P: {proteina}g | C: {carbs}g | G: {grasas}g\n\n"
-        f"🥗 <b>TU MENÚ:</b>\n\n{dieta_html}\n\n"
+        f"🥗 <b>TU MENÚ Y ENTRENAMIENTO:</b>\n\n{dieta_html}\n\n"
         f"👻 <b>Shadow Mode (MIMO):</b>\n"
         f"• Estado: <b>{estado_mimo}</b>\n"
         f"• Mult. Sugerido: {shadow_mult}\n"
