@@ -138,8 +138,14 @@ def ejecutar_job():
     Perfil: Peso: {peso_actual}kg | Grasa: {grasa_actual}% (Visceral: {dato_actual['VisFat']}) | Agua: {dato_actual['Agua']}% | FFM: {fat_free_weight}kg.
     Macros diarios: Kcal: {calorias} | P: {proteina}g | C: {carbs}g | G: {grasas}g.
     Nota: Grasa visceral en {dato_actual['VisFat']}. Prioriza omega 3 y antiinflamatorios.
-    REGLA ESTRICTA: Usa SOLO etiquetas <b> e <i> para resaltar. Usa saltos de línea reales (\\n) y guiones (-) para listas. PROHIBIDO usar <br>, <hr>, <ul>, <li> o cualquier otra etiqueta HTML."""
+
+    REGLAS DE ESTILO DE VIDA (ESTRICTAS):
+    1. Desayunos: Ultra-rápidos (<5 mins prep) y portátiles para el auto (ej. batidos densos, overnight oats, wraps fríos).
+    2. Comidas/Almuerzos (Lonche): SIEMPRE son las sobras de la cena anterior. Las cenas deben ser comidas completas que se puedan recalentar bien en la oficina.
+    3. Cenas: Llego a las 6:00 PM con mucha hambre tras el gimnasio. Deben ser voluminosas (muy saciantes) y fáciles de cocinar.
+    4. Pre-entrenamiento: Incluye un snack rápido de energía para las 3:30 PM antes de salir al gimnasio.
     
+    REGLA DE FORMATO ESTRICTA: Usa SOLO etiquetas <b> e <i> para resaltar. Usa saltos de línea reales (\\n) y guiones (-) para listas. PROHIBIDO usar <br>, <hr>, <ul>, <li> o cualquier otra etiqueta."""    
     try:
         client = genai.Client()
         respuesta = client.models.generate_content(model='gemini-2.5-pro', contents=prompt)
