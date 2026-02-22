@@ -49,16 +49,29 @@ def enviar_mensaje_telegram(mensaje):
     # 🧹 FILTRO SANITARIO AGRESIVO
     mensaje = mensaje.replace("<br>", "\n").replace("<br/>", "\n").replace("<ul>", "").replace("</ul>", "").replace("<li>", "• ").replace("</li>", "\n").replace("<hr>", "---").replace("<hr/>", "---").replace("<p>", "").replace("</p>", "\n").replace("<strong>", "<b>").replace("</strong>", "</b>")
     
-    texto_seguro = mensaje if len(mensaje) < 4000 else mensaje[:3900] + "\n\n[... Menú truncado por Telegram ...]"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texto_seguro, "parse_mode": "HTML"}
-    
-    res = requests.post(url, json=payload)
-    if res.status_code != 200:
-        logging.error(f"⚠️ Error HTML en Telegram: {res.text}. Enviando texto plano...")
-        del payload["parse_mode"]
-        res2 = requests.post(url, json=payload)
-        if res2.status_code != 200:
-            logging.error(f"⚠️ Error CRÍTICO en fallback: {res2.text}")
+    # 📦 ENVÍO EN MÚLTIPLES BLOQUES (Para que llegue la semana completa)
+    partes = []
+    while len(mensaje) > 0:
+        if len(mensaje) <= 3900:
+            partes.append(mensaje)
+            break
+        # Cortar en el último párrafo para no romper etiquetas HTML
+        corte = mensaje.rfind('\n\n', 0, 3900)
+        if corte == -1: corte = mensaje.rfind('\n', 0, 3900)
+        if corte == -1: corte = 3900
+        
+        partes.append(mensaje[:corte])
+        mensaje = mensaje[corte:].lstrip()
+        
+    for parte in partes:
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": parte, "parse_mode": "HTML"}
+        res = requests.post(url, json=payload)
+        if res.status_code != 200:
+            logging.error(f"⚠️ Error HTML en Telegram: {res.text}. Enviando texto plano...")
+            del payload["parse_mode"]
+            res2 = requests.post(url, json=payload)
+            if res2.status_code != 200:
+                logging.error(f"⚠️ Error CRÍTICO en fallback: {res2.text}")
 
 # ==========================================
 # LEYES DE CONTROL (MIMO SHADOW & SISO ACTIVO)
@@ -140,12 +153,14 @@ def ejecutar_job():
     Nota: Grasa visceral en {dato_actual['VisFat']}. Prioriza omega 3 y antiinflamatorios.
 
     REGLAS DE ESTILO DE VIDA (ESTRICTAS):
-    1. Desayunos: Ultra-rápidos (<5 mins prep) y portátiles para el auto (ej. batidos densos, overnight oats, wraps fríos).
-    2. Comidas/Almuerzos (Lonche): SIEMPRE son las sobras de la cena anterior. Las cenas deben ser comidas completas que se puedan recalentar bien en la oficina.
-    3. Cenas: Llego a las 6:00 PM con mucha hambre tras el gimnasio. Deben ser voluminosas (muy saciantes) y fáciles de cocinar.
-    4. Pre-entrenamiento: Incluye un snack rápido de energía para las 3:30 PM antes de salir al gimnasio.
+    1. LUNES, MIERCOLES Y JUEVES (Oficina y Gym Pesado): Salgo 4pm, entreno 45 min en gym, ceno 6pm. Cenas deben ser muy saciantes. El lonche es SIEMPRE la sobra de la cena anterior.
+    2. MARTES Y VIERNES (Home Office y Bebé): Entreno en casa 30 min de alta intensidad aprovechando las siestas del bebé.
+    3. FIN DE SEMANA: Actividad ligera o descanso activo.
+    4. Desayunos: Ultra-rápidos (<5 mins) y portátiles para comer en el auto camino a la oficina.
+    5. Pre-entreno: Snack rápido de energía a las 3:30 PM.
     
-    REGLA DE FORMATO ESTRICTA: Usa SOLO etiquetas <b> e <i> para resaltar. Usa saltos de línea reales (\\n) y guiones (-) para listas. PROHIBIDO usar <br>, <hr>, <ul>, <li> o cualquier otra etiqueta."""    
+    REGLA ESTRICTA DE FORMATO: Usa SOLO etiquetas <b> e <i> para resaltar. Usa saltos de línea reales (\\n) y guiones (-) para listas. PROHIBIDO usar <br>, <hr>, <ul>, <li> o cualquier otra etiqueta HTML."""
+    
     try:
         client = genai.Client()
         respuesta = client.models.generate_content(model='gemini-2.5-pro', contents=prompt)
