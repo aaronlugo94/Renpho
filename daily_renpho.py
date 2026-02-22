@@ -124,9 +124,15 @@ def analizar_con_ia(m, datos_ayer):
             time.sleep(2)
 
 def enviar_telegram(mensaje):
-    if DRY_RUN: return log(mensaje)
-    requests.post(f"https://api.telegram.org/bot{env_vars['TELEGRAM_BOT_TOKEN']}/sendMessage", 
-                  json={"chat_id": env_vars["TELEGRAM_CHAT_ID"], "text": mensaje, "parse_mode": "HTML"})
+    if DRY_RUN: return log(f"DRY RUN: {mensaje}")
+    url = f"https://api.telegram.org/bot{env_vars['TELEGRAM_BOT_TOKEN']}/sendMessage"
+    payload = {"chat_id": env_vars["TELEGRAM_CHAT_ID"], "text": mensaje, "parse_mode": "HTML"}
+    
+    res = requests.post(url, json=payload)
+    if res.status_code != 200:
+        log(f"⚠️ Telegram rechazó el HTML. Fallback a texto plano... Error: {res.text}")
+        payload["parse_mode"] = None  # Apaga el validador estricto de Telegram
+        requests.post(url, json=payload)
 
 def ejecutar_diario():
     try:
