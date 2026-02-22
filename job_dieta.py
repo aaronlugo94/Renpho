@@ -1,7 +1,7 @@
 import os
 import sqlite3
 import pandas as pd
-from google import genai  # <-- IMPORTACIÓN NUEVA
+from google import genai
 import requests
 import logging
 from datetime import datetime, timedelta
@@ -11,7 +11,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 TZ = timezone(os.getenv("TZ", "America/Phoenix"))
 
-# Ya no necesitamos genai.configure() aquí, el cliente nuevo lo toma automático de os.environ
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 ARCHIVO_DB = "/app/data/mis_datos_renpho.db"
@@ -47,8 +46,8 @@ def enviar_mensaje_telegram(mensaje):
     if DRY_RUN: return logging.info(f"DRY RUN: {mensaje}")
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
-    # 🧹 FILTRO SANITARIO: Telegram odia estas etiquetas. Las convertimos a texto normal.
-    mensaje = mensaje.replace("<br>", "\n").replace("<br/>", "\n").replace("<ul>", "").replace("</ul>", "").replace("<li>", "• ").replace("</li>", "\n")
+    # 🧹 FILTRO SANITARIO AGRESIVO
+    mensaje = mensaje.replace("<br>", "\n").replace("<br/>", "\n").replace("<ul>", "").replace("</ul>", "").replace("<li>", "• ").replace("</li>", "\n").replace("<hr>", "---").replace("<hr/>", "---").replace("<p>", "").replace("</p>", "\n").replace("<strong>", "<b>").replace("</strong>", "</b>")
     
     texto_seguro = mensaje if len(mensaje) < 4000 else mensaje[:3900] + "\n\n[... Menú truncado por Telegram ...]"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texto_seguro, "parse_mode": "HTML"}
@@ -56,7 +55,7 @@ def enviar_mensaje_telegram(mensaje):
     res = requests.post(url, json=payload)
     if res.status_code != 200:
         logging.error(f"⚠️ Error HTML en Telegram: {res.text}. Enviando texto plano...")
-        del payload["parse_mode"]  # <-- Esta es la forma correcta y blindada de quitarlo
+        del payload["parse_mode"]
         res2 = requests.post(url, json=payload)
         if res2.status_code != 200:
             logging.error(f"⚠️ Error CRÍTICO en fallback: {res2.text}")
@@ -119,7 +118,6 @@ def ejecutar_job():
     
     kcal_mult_actual = obtener_estado_actual(ARCHIVO_DB)
 
-    # === SHADOW MODE MIMO (Solo Lectura) ===
     try:
         estado_mimo, shadow_mult, shadow_macros, shadow_razon = evaluar_estado_metabolico(delta_peso, delta_grasa, delta_musculo, kcal_mult_actual)
         logging.info(f"[SHADOW_MIMO] estado={estado_mimo} | kcal_actual={kcal_mult_actual:.1f} | kcal_sugerido={shadow_mult:.1f} | Δpeso={delta_peso:.2f}kg | Δgrasa={delta_grasa:.2f}% | Δmusculo={delta_musculo:.2f}kg")
@@ -128,35 +126,29 @@ def ejecutar_job():
         logging.exception(f"[SHADOW_MIMO] Error: {e}")
         estado_mimo, shadow_mult, shadow_macros, shadow_razon = "ERROR", kcal_mult_actual, "Shadow Mode falló.", "Error evaluación MIMO."
 
-    # === LEY SISO (Aplica cambios reales) ===
     nuevo_mult, razon_control, hubo_cambio = aplicar_ley_de_control(delta_peso, kcal_mult_actual)
     if hubo_cambio: actualizar_estado(ARCHIVO_DB, nuevo_mult)
 
-    # === CÁLCULO DE MACROS ===
     calorias = round(peso_actual * nuevo_mult)
     proteina = round(fat_free_weight * 2.2) 
     grasas = round(peso_actual * 0.7) 
     carbs = max(0, round((calorias - (proteina * 4 + grasas * 9)) / 4))
 
-    # === GENERACIÓN DE MENÚ (NUEVO SDK) ===
     prompt = f"""Eres mi nutriólogo deportivo. Diseña un plan de comidas de 7 días.
     Perfil: Peso: {peso_actual}kg | Grasa: {grasa_actual}% (Visceral: {dato_actual['VisFat']}) | Agua: {dato_actual['Agua']}% | FFM: {fat_free_weight}kg.
-    Macros estrictos diarios: Kcal: {calorias} | P: {proteina}g | C: {carbs}g | G: {grasas}g.
+    Macros diarios: Kcal: {calorias} | P: {proteina}g | C: {carbs}g | G: {grasas}g.
     Nota: Grasa visceral en {dato_actual['VisFat']}. Prioriza omega 3 y antiinflamatorios.
-    REGLA: Usa formato HTML básico (<b>, <i>, <ul>, <li>). NO uses Markdown. NO respondas con bloques de código."""
+    REGLA ESTRICTA: Usa SOLO etiquetas <b> e <i> para resaltar. Usa saltos de línea reales (\\n) y guiones (-) para listas. PROHIBIDO usar <br>, <hr>, <ul>, <li> o cualquier otra etiqueta HTML."""
     
     try:
-        # Usamos el cliente nuevo
-        client = genai.Client() # Toma la API_KEY del entorno automáticamente
+        client = genai.Client()
         respuesta = client.models.generate_content(model='gemini-2.5-pro', contents=prompt)
         
         if not respuesta or not hasattr(respuesta, "text") or not respuesta.text.strip(): raise ValueError("Respuesta IA vacía.")
         dieta_html = respuesta.text.strip()
-        if len(dieta_html) > 3000: dieta_html = dieta_html[:3000] + "\n\n<i>... [Menú truncado por longitud. Revisa los primeros días] ...</i>"
     except Exception as e:
         return enviar_mensaje_telegram("⚠️ Error al contactar IA para generar menú.")
 
-    # === NOTIFICAR ===
     mensaje_telegram = (
         f"🤖 <b>CONTROL METABÓLICO V4.0</b> 🤖\n\n"
         f"📊 <b>Telemetría Semanal:</b>\n"
