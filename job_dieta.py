@@ -1,7 +1,7 @@
 import os
 import sqlite3
 import pandas as pd
-import google.generativeai as genai
+from google import genai  # <-- IMPORTACIÓN NUEVA
 import requests
 import logging
 from datetime import datetime, timedelta
@@ -11,12 +11,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 TZ = timezone(os.getenv("TZ", "America/Phoenix"))
 
-API_KEY_GEMINI = os.getenv("GOOGLE_API_KEY")
+# Ya no necesitamos genai.configure() aquí, el cliente nuevo lo toma automático de os.environ
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 ARCHIVO_DB = "/app/data/mis_datos_renpho.db"
-
-genai.configure(api_key=API_KEY_GEMINI)
 
 # ==========================================
 # ESTADO & TELEGRAM
@@ -129,7 +127,7 @@ def ejecutar_job():
     grasas = round(peso_actual * 0.7) 
     carbs = max(0, round((calorias - (proteina * 4 + grasas * 9)) / 4))
 
-    # === GENERACIÓN DE MENÚ ===
+    # === GENERACIÓN DE MENÚ (NUEVO SDK) ===
     prompt = f"""Eres mi nutriólogo deportivo. Diseña un plan de comidas de 7 días.
     Perfil: Peso: {peso_actual}kg | Grasa: {grasa_actual}% (Visceral: {dato_actual['VisFat']}) | Agua: {dato_actual['Agua']}% | FFM: {fat_free_weight}kg.
     Macros estrictos diarios: Kcal: {calorias} | P: {proteina}g | C: {carbs}g | G: {grasas}g.
@@ -137,7 +135,10 @@ def ejecutar_job():
     REGLA: Usa formato HTML básico (<b>, <i>, <ul>, <li>). NO uses Markdown. NO respondas con bloques de código."""
     
     try:
-        respuesta = genai.GenerativeModel('gemini-2.5-pro').generate_content(prompt)
+        # Usamos el cliente nuevo
+        client = genai.Client() # Toma la API_KEY del entorno automáticamente
+        respuesta = client.models.generate_content(model='gemini-2.5-pro', contents=prompt)
+        
         if not respuesta or not hasattr(respuesta, "text") or not respuesta.text.strip(): raise ValueError("Respuesta IA vacía.")
         dieta_html = respuesta.text.strip()
         if len(dieta_html) > 3000: dieta_html = dieta_html[:3000] + "\n\n<i>... [Menú truncado por longitud. Revisa los primeros días] ...</i>"
