@@ -145,7 +145,7 @@ def ejecutar_diario():
     try:
         m = obtener_datos_renpho()
         ayer, ya_existia = manejar_historial(m)
-        if ya_existia: return True 
+        #if ya_existia: return True 
         
         analisis = analizar_con_ia(m, ayer)
         reporte = (
