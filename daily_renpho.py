@@ -278,9 +278,6 @@ def obtener_datos_renpho() -> dict:
 
         u = max(mediciones, key=extraer_ts)
 
-        # Diagnóstico: loguear las claves reales que devuelve Renpho
-        logging.info(f"Campos disponibles en medición Renpho: {list(u.keys())}")
-
         # Renpho usa timeStamp (camelCase) — probamos variantes por compatibilidad
         ts = (
             u.get("timeStamp") or
