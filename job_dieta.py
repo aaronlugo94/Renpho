@@ -142,17 +142,50 @@ def inicializar_bd():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_hist_fecha ON historico_dietas(fecha)")
 
-        # Migraciones en caliente
-        columnas = {row[1] for row in conn.execute("PRAGMA table_info(historico_dietas)")}
-        migraciones = {
+        # Migraciones en caliente para historico_dietas
+        columnas_hist = {row[1] for row in conn.execute("PRAGMA table_info(historico_dietas)")}
+        migraciones_hist = {
             "estado_mimo": "TEXT",
             "shadow_mult": "REAL",
             "score_comp":  "INTEGER",
         }
-        for col, tipo in migraciones.items():
-            if col not in columnas:
+        for col, tipo in migraciones_hist.items():
+            if col not in columnas_hist:
                 conn.execute(f"ALTER TABLE historico_dietas ADD COLUMN {col} {tipo}")
-                logging.info(f"Migración aplicada: columna {col} añadida.")
+                logging.info(f"Migración aplicada (historico_dietas): columna {col} añadida.")
+
+        # ── Migración crítica de la tabla pesajes ─────────────────────────────
+        # El daily migra Musculo → Musculo_Pct cuando corre, pero si el usuario
+        # estuvo de viaje semanas sin pesarse, el job de dieta puede correr el
+        # domingo con registros históricos sin migrar. Este bloque lo garantiza.
+        columnas_pesajes = {row[1] for row in conn.execute("PRAGMA table_info(pesajes)")}
+
+        if "pesajes" in {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
+            migraciones_pesajes = {
+                "Timestamp":     "INTEGER",
+                "Musculo_kg":    "REAL",
+                "FatFreeWeight": "REAL",
+                "Proteina":      "REAL",
+                "MasaOsea":      "REAL",
+                "Musculo_Pct":   "REAL",
+            }
+            for col, tipo in migraciones_pesajes.items():
+                if col not in columnas_pesajes:
+                    conn.execute(f"ALTER TABLE pesajes ADD COLUMN {col} {tipo}")
+                    logging.info(f"Migración aplicada (pesajes): columna {col} añadida.")
+
+            # Copia datos históricos de Musculo → Musculo_Pct donde falten
+            if "Musculo" in columnas_pesajes and "Musculo_Pct" in columnas_pesajes:
+                resultado = conn.execute(
+                    "UPDATE pesajes SET Musculo_Pct = Musculo WHERE Musculo_Pct IS NULL AND Musculo IS NOT NULL"
+                )
+                if resultado.rowcount > 0:
+                    logging.info(f"Migración de datos: {resultado.rowcount} registros Musculo → Musculo_Pct.")
+
+            # Índices por si tampoco los creó el daily
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_timestamp ON pesajes (Timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_fecha ON pesajes (Fecha)")
+
         conn.commit()
 
 
