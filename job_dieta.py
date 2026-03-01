@@ -1,5 +1,5 @@
 """
-job_dieta.py — V5.0 Production Grade
+job_dieta.py — V5.1 Production Grade
 Mejoras vs V4.0:
   1. Context managers en TODAS las conexiones SQLite
   2. GOOGLE_API_KEY explícita (consistente con daily_renpho)
@@ -11,6 +11,12 @@ Mejoras vs V4.0:
   8. Semáforos visuales en métricas del reporte
   9. Particionado de Telegram con _HTML_SANITIZE centralizado
   10. logging con exc_info en todos los errores críticos
+
+Fixes V5.1 (code review Gemini):
+  - BMR inyectado en prompt como límite mínimo calórico (protege tiroides)
+  - .copy() en slice de Pandas (elimina SettingWithCopyWarning)
+  - DB commit ANTES de enviar Telegram (idempotencia real)
+  - Arquitectura de conexiones separada: leer → calcular → escribir
 """
 
 import os
@@ -176,7 +182,7 @@ def job_ya_ejecutado_hoy(conn: sqlite3.Connection) -> bool:
 def obtener_datos_semana(conn: sqlite3.Connection) -> pd.DataFrame:
     return pd.read_sql_query("""
         SELECT Fecha, Peso_kg, Grasa_Porcentaje, Musculo, FatFreeWeight,
-               Agua, VisFat, BMI, EdadMetabolica, Proteina, MasaOsea
+               Agua, VisFat, BMI, EdadMetabolica, Proteina, MasaOsea, BMR
         FROM pesajes
         WHERE Fecha >= date('now', '-14 day')
         ORDER BY Fecha ASC
@@ -257,7 +263,7 @@ def aplicar_siso(delta_peso: float, mult_actual: float) -> tuple:
 
 def generar_dieta_ia(
     peso, grasa, visceral, agua, fat_free_weight,
-    calorias, proteina, carbs, grasas,
+    calorias, proteina, carbs, grasas, bmr,
     delta_peso, delta_grasa, delta_musculo,
     estado_mimo, razon_mimo
 ) -> str:
@@ -266,7 +272,6 @@ def generar_dieta_ia(
     GARANTÍA: siempre retorna string, nunca None.
     """
     logging.info("🧠 Generando plan semanal con IA...")
-    client = genai.Client(api_key=env_vars["GOOGLE_API_KEY"])
 
     prompt = f"""Eres mi nutriólogo deportivo y entrenador personal de alto rendimiento. Diseña un plan completo de 7 días basado en mis datos exactos.
 
@@ -278,6 +283,8 @@ PERFIL ACTUAL:
 
 MACROS DIARIOS CALCULADOS:
 - Calorías: {calorias} kcal | Proteína: {proteina}g | Carbohidratos: {carbs}g | Grasas: {grasas}g
+- ⚠️ LÍMITE MÍNIMO ABSOLUTO: Nunca recomiendes por debajo de {bmr} kcal/día (BMR real).
+  Comer por debajo del BMR destruye el metabolismo y la masa muscular. Es innegociable.
 
 RESTRICCIONES DE ESTILO DE VIDA (OBLIGATORIAS):
 1. LUNES, MIÉRCOLES, JUEVES (Oficina + Gym pesado):
@@ -398,7 +405,7 @@ def ejecutar_job():
         # Dato anterior: el pesaje más cercano a hace 7 días, mínimo 5 días atrás
         # Esto evita comparar contra un pesaje de hace 1 día por error
         fecha_limite = df.iloc[-1]["Fecha"] - timedelta(days=5)
-        df_anteriores = df[df["Fecha"] <= fecha_limite]
+        df_anteriores = df[df["Fecha"] <= fecha_limite].copy()
 
         if df_anteriores.empty:
             enviar_telegram("⚠️ No hay pesajes con al menos 5 días de antigüedad. Espera más datos.")
@@ -420,6 +427,7 @@ def ejecutar_job():
         edad_metabolica  = int(dato_actual["EdadMetabolica"]) if dato_actual["EdadMetabolica"] else None
         proteina_corp    = float(dato_actual["Proteina"]) if dato_actual["Proteina"] else None
         masa_osea        = float(dato_actual["MasaOsea"]) if dato_actual["MasaOsea"] else None
+        bmr_actual       = int(dato_actual["BMR"]) if dato_actual.get("BMR") else round(peso_actual * 22)
 
         delta_peso    = peso_actual   - float(dato_anterior["Peso_kg"])
         delta_grasa   = grasa_actual  - float(dato_anterior["Grasa_Porcentaje"])
@@ -464,7 +472,7 @@ def ejecutar_job():
         # ── Generación del plan ───────────────────────────────────────────────
         dieta_html = generar_dieta_ia(
             peso_actual, grasa_actual, visfat_actual, agua_actual, fat_free_weight,
-            calorias, proteina, carbs, grasas,
+            calorias, proteina, carbs, grasas, bmr_actual,
             delta_peso, delta_grasa, delta_musculo,
             estado_mimo, razon_mimo,
         )
@@ -516,9 +524,10 @@ def ejecutar_job():
             f"🥗 <b>TU PLAN SEMANAL:</b>\n\n{dieta_html}"
         )
 
-        enviar_telegram(reporte)
-
-        # ── Persistencia del historial ─────────────────────────────────────────
+        # ── Persistencia PRIMERO, Telegram DESPUÉS ────────────────────────────
+        # Regla: si falla el INSERT, el job no queda marcado como ejecutado
+        # y el cron reintentará. Si mandamos Telegram primero y falla el INSERT,
+        # recibes el mensaje pero el job vuelve a correr la próxima hora.
         conn.execute("""
             INSERT INTO historico_dietas
             (fecha, peso, grasa, delta_peso, kcal_mult, calorias,
@@ -531,8 +540,12 @@ def ejecutar_job():
             dieta_html, estado_mimo, shadow_mult, score,
         ))
         conn.commit()
+        logging.info("💾 Historial persistido en SQLite.")
 
-    logging.info("✅ Job semanal ejecutado exitosamente.")
+    # ── Telegram fuera del context manager (DB ya cerrada) ────────────────
+    # La DB está cerrada antes de hacer la llamada de red — patrón SRE correcto.
+    enviar_telegram(reporte)
+    logging.info("✅ Job semanal ejecutado y notificado exitosamente.")
 
 
 if __name__ == "__main__":
