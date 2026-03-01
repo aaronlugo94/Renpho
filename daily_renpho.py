@@ -99,16 +99,22 @@ def inicializar_db():
         # el CREATE UNIQUE INDEX de abajo, que sí es compatible con migraciones
         columnas = {row[1] for row in conn.execute("PRAGMA table_info(pesajes)")}
         migraciones = {
-            "Timestamp":     "INTEGER",  # Sin UNIQUE aquí
+            "Timestamp":     "INTEGER",
             "Musculo_kg":    "REAL",
             "FatFreeWeight": "REAL",
             "Proteina":      "REAL",
             "MasaOsea":      "REAL",
+            "Musculo_Pct":   "REAL",  # Esquema nuevo — renombre de "Musculo"
         }
         for col, tipo in migraciones.items():
             if col not in columnas:
                 conn.execute(f"ALTER TABLE pesajes ADD COLUMN {col} {tipo}")
                 logging.info(f"Migración aplicada: columna {col} añadida.")
+
+        # Si existe la columna vieja "Musculo" pero no "Musculo_Pct", copiar los datos
+        if "Musculo" in columnas and "Musculo_Pct" in columnas:
+            conn.execute("UPDATE pesajes SET Musculo_Pct = Musculo WHERE Musculo_Pct IS NULL")
+            logging.info("Migración de datos: Musculo → Musculo_Pct completada.")
 
         # UNIQUE INDEX — equivalente al constraint pero compatible con ALTER TABLE
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_timestamp ON pesajes (Timestamp)")
@@ -243,22 +249,23 @@ def obtener_datos_renpho() -> dict:
 
         def extraer_ts(m):
             return (
-                m.get("time_stamp") or m.get("timeStamp") or
-                m.get("timestamp") or m.get("created_at") or
-                m.get("createTime") or m.get("measureTime") or 0
+                m.get("timeStamp") or   # ← nombre real confirmado en logs
+                m.get("time_stamp") or
+                m.get("timestamp") or
+                m.get("created_at") or
+                m.get("createTime") or
+                m.get("measureTime") or 0
             )
 
         u = max(mediciones, key=extraer_ts)
 
         # Diagnóstico: loguear las claves reales que devuelve Renpho
-        # (útil para detectar cambios en la API sin tener que adivinar)
         logging.info(f"Campos disponibles en medición Renpho: {list(u.keys())}")
 
-        # Renpho ha cambiado el nombre del campo en distintas versiones
-        # Probamos todos los nombres conocidos
+        # Renpho usa timeStamp (camelCase) — probamos variantes por compatibilidad
         ts = (
-            u.get("time_stamp") or
             u.get("timeStamp") or
+            u.get("time_stamp") or
             u.get("timestamp") or
             u.get("created_at") or
             u.get("createTime") or
@@ -278,11 +285,13 @@ def obtener_datos_renpho() -> dict:
             "bmr":              u.get("bmr"),
             "edad_metabolica":  u.get("bodyage"),
             "grasa_visceral":   u.get("visfat"),
+            "grasa_subcutanea": u.get("subfat"),       # ← confirmado en log
             "masa_muscular_kg": u.get("sinew"),
             "musculo_pct":      u.get("muscle"),
             "fat_free_weight":  u.get("fatFreeWeight"),
             "proteina":         u.get("protein"),
             "masa_osea":        u.get("bone"),
+            "frecuencia_cardiaca": u.get("heartRate"),  # ← confirmado en log
         }
 
         campos_criticos = ["peso", "grasa", "musculo_pct", "agua"]
