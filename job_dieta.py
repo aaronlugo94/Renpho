@@ -47,14 +47,16 @@ if faltantes:
     raise RuntimeError(f"Faltan variables de entorno: {', '.join(faltantes)}")
 
 
-# ─── RANGOS CLÍNICOS (mismo estándar que daily_renpho) ────────────────────────
+# ─── RANGOS CLÍNICOS — CALIBRADOS AL PERFIL DE AARON ─────────────────────────
+# Mismo estándar que daily_renpho — ambos scripts deben hablar el mismo idioma.
+# Ver daily_renpho.py para la lógica completa de calibración.
 
 RANGOS = {
-    "bmi":          {"optimo": (18.5, 24.9), "alerta": (25.0, 29.9), "critico": (30.0, 99)},
-    "grasa_hombre": {"optimo": (10.0, 20.0), "alerta": (20.1, 25.0), "critico": (25.1, 100)},
-    "visceral":     {"optimo": (1,    9),    "alerta": (10,   14),   "critico": (15,   30)},
-    "agua":         {"optimo": (50.0, 65.0), "alerta": (45.0, 49.9), "critico": (0,    44.9)},
-    "proteina":     {"optimo": (16.0, 20.0), "alerta": (14.0, 15.9), "critico": (0,    13.9)},
+    "bmi":          {"optimo": (18.5, 27.0), "alerta": (27.1, 32.0), "critico": (32.1, 99)},
+    "grasa_hombre": {"optimo": (20.0, 27.0), "alerta": (27.1, 32.0), "critico": (32.1, 100)},
+    "visceral":     {"optimo": (1,    9),    "alerta": (10,   13),   "critico": (14,   30)},
+    "agua":         {"optimo": (53.0, 65.0), "alerta": (49.0, 52.9), "critico": (0,    48.9)},
+    "proteina":     {"optimo": (16.5, 20.0), "alerta": (15.0, 16.4), "critico": (0,    14.9)},
 }
 
 def clasificar(valor, metrica: str) -> str:
@@ -120,7 +122,7 @@ def inicializar_bd():
         """)
         conn.execute("""
             INSERT OR IGNORE INTO config_nutricion (clave, valor)
-            VALUES ('kcal_mult', 26.0)
+            VALUES ('kcal_mult', 24.0)
         """)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS historico_dietas (
