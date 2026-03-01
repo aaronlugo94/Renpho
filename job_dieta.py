@@ -181,8 +181,9 @@ def job_ya_ejecutado_hoy(conn: sqlite3.Connection) -> bool:
 
 def obtener_datos_semana(conn: sqlite3.Connection) -> pd.DataFrame:
     return pd.read_sql_query("""
-        SELECT Fecha, Peso_kg, Grasa_Porcentaje, Musculo, FatFreeWeight,
-               Agua, VisFat, BMI, EdadMetabolica, Proteina, MasaOsea, BMR
+        SELECT Fecha, Peso_kg, Grasa_Porcentaje,
+               COALESCE(Musculo_Pct, Musculo) AS Musculo_Pct,
+               FatFreeWeight, Agua, VisFat, BMI, EdadMetabolica, Proteina, MasaOsea, BMR
         FROM pesajes
         WHERE Fecha >= date('now', '-14 day')
         ORDER BY Fecha ASC
@@ -426,7 +427,7 @@ def ejecutar_job():
         # ── Variables principales ─────────────────────────────────────────────
         peso_actual      = float(dato_actual["Peso_kg"])
         grasa_actual     = float(dato_actual["Grasa_Porcentaje"])
-        musculo_actual   = float(dato_actual["Musculo"])
+        musculo_actual   = float(dato_actual["Musculo_Pct"])
         agua_actual      = float(dato_actual["Agua"])
         fat_free_weight  = float(dato_actual["FatFreeWeight"])
         visfat_actual    = float(dato_actual["VisFat"])
@@ -438,7 +439,7 @@ def ejecutar_job():
 
         delta_peso    = peso_actual   - float(dato_anterior["Peso_kg"])
         delta_grasa   = grasa_actual  - float(dato_anterior["Grasa_Porcentaje"])
-        delta_musculo = musculo_actual - float(dato_anterior["Musculo"])
+        delta_musculo = musculo_actual - float(dato_anterior["Musculo_Pct"])
 
         # ── Scoring y alertas ─────────────────────────────────────────────────
         score, desc_score = calcular_score_composicion(
