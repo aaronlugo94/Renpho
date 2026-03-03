@@ -1,22 +1,10 @@
 """
-job_dieta.py — V5.1 Production Grade
-Mejoras vs V4.0:
-  1. Context managers en TODAS las conexiones SQLite
-  2. GOOGLE_API_KEY explícita (consistente con daily_renpho)
-  3. MIMO promovido a ciudadano de primera clase en el reporte
-  4. Validación robusta del dato_anterior (mínimo 5 días atrás)
-  5. Score de composición corporal heredado del daily
-  6. Alertas clínicas automáticas
-  7. analizar_con_ia nunca retorna None (reintentos + fallback)
-  8. Semáforos visuales en métricas del reporte
-  9. Particionado de Telegram con _HTML_SANITIZE centralizado
-  10. logging con exc_info en todos los errores críticos
-
-Fixes V5.1 (code review Gemini):
-  - BMR inyectado en prompt como límite mínimo calórico (protege tiroides)
-  - .copy() en slice de Pandas (elimina SettingWithCopyWarning)
-  - DB commit ANTES de enviar Telegram (idempotencia real)
-  - Arquitectura de conexiones separada: leer → calcular → escribir
+job_dieta.py — V5.2 Production Grade
+Fixes V5.2:
+  - Proteina: None corregido (pd.notna check)
+  - SISO con piso inteligente basado en BMR real (BMR * 1.15)
+  - PDF semanal generado y enviado por Telegram cada domingo
+  - Import limpio de generar_pdf_semanal con fallback graceful
 """
 
 import os
@@ -27,6 +15,13 @@ import logging
 from datetime import datetime, timedelta
 from pytz import timezone
 from google import genai
+try:
+    from generar_pdf_semanal import generar_pdf
+    PDF_DISPONIBLE = True
+except ImportError:
+    PDF_DISPONIBLE = False
+    logging.warning("generar_pdf_semanal.py no encontrado — PDF desactivado.")
+
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
 
@@ -271,11 +266,17 @@ def evaluar_mimo(delta_peso: float, delta_grasa: float, delta_musculo: float, mu
     return estado, mult_seguro, razon
 
 
-def aplicar_siso(delta_peso: float, mult_actual: float) -> tuple:
+def aplicar_siso(delta_peso: float, mult_actual: float, bmr: int = 2000, peso: float = 100) -> tuple:
     """
     Ley de control SISO activa — modifica el multiplicador real.
     Variable de control: delta_peso. Salida: nuevo multiplicador.
+    Piso inteligente: nunca bajar de BMR + 15% de margen de actividad.
     """
+    # Piso dinámico basado en BMR real — nunca menos de BMR+15% dividido por peso
+    piso_calorias = round(bmr * 1.15)  # BMR + 15% mínimo para actividad básica
+    piso_mult     = round(piso_calorias / peso, 1)
+    piso_mult     = max(piso_mult, 21.0)  # Nunca menos de 21 en términos absolutos
+
     if delta_peso < -0.8:
         nuevo = mult_actual + 1
         razon = "📉 Pérdida rápida. Aumento multiplicador para proteger músculo."
@@ -289,9 +290,13 @@ def aplicar_siso(delta_peso: float, mult_actual: float) -> tuple:
         razon = "✅ Progreso óptimo. Multiplicador mantenido."
         cambio = False
 
-    nuevo_seguro = max(20.0, min(nuevo, 34.0))
+    # Aplicar piso dinámico (BMR-based) y techo fijo
+    nuevo_seguro = max(piso_mult, min(nuevo, 34.0))
     if nuevo_seguro != nuevo:
-        razon += f" (Limitado a {nuevo_seguro})"
+        if nuevo < piso_mult:
+            razon += f" (Piso BMR aplicado: mínimo {piso_mult} kcal/kg = {piso_calorias} kcal)"
+        else:
+            razon += f" (Limitado a {nuevo_seguro})"
     return nuevo_seguro, razon, cambio
 
 
@@ -468,7 +473,7 @@ def ejecutar_job():
         visfat_actual    = float(dato_actual["VisFat"])
         bmi_actual       = float(dato_actual["BMI"]) if dato_actual["BMI"] else None
         edad_metabolica  = int(dato_actual["EdadMetabolica"]) if dato_actual["EdadMetabolica"] else None
-        proteina_corp    = float(dato_actual["Proteina"]) if dato_actual["Proteina"] else None
+        proteina_corp    = float(dato_actual["Proteina"]) if pd.notna(dato_actual["Proteina"]) and dato_actual["Proteina"] else None
         masa_osea        = float(dato_actual["MasaOsea"]) if dato_actual["MasaOsea"] else None
         bmr_actual       = int(dato_actual["BMR"]) if dato_actual.get("BMR") else round(peso_actual * 22)
 
@@ -500,7 +505,7 @@ def ejecutar_job():
         )
 
         # SISO: control activo mono-variable (actúa sobre el multiplicador real)
-        nuevo_mult, razon_siso, hubo_cambio = aplicar_siso(delta_peso, mult_actual)
+        nuevo_mult, razon_siso, hubo_cambio = aplicar_siso(delta_peso, mult_actual, bmr_actual, peso_actual)
         if hubo_cambio:
             actualizar_multiplicador(conn, nuevo_mult)
             conn.commit()
@@ -586,8 +591,63 @@ def ejecutar_job():
         logging.info("💾 Historial persistido en SQLite.")
 
     # ── Telegram fuera del context manager (DB ya cerrada) ────────────────
-    # La DB está cerrada antes de hacer la llamada de red — patrón SRE correcto.
     enviar_telegram(reporte)
+
+    # ── PDF Semanal ───────────────────────────────────────────────────────
+    if PDF_DISPONIBLE:
+        try:
+            fecha_str = datetime.now(TZ).strftime("%Y-%m-%d")
+            ruta_pdf  = f"/app/data/reportes/reporte_{fecha_str}.pdf"
+
+            datos_pdf = {
+                "fecha":        datetime.now(TZ).strftime("%d/%m/%Y"),
+                "dias_entre":   dias_entre,
+                "score":        score,
+                "desc_score":   desc_score,
+                "peso":         peso_actual,    "delta_peso":     delta_peso,
+                "grasa":        grasa_actual,   "delta_grasa":    delta_grasa,
+                "musculo":      musculo_actual, "delta_musculo":  delta_musculo,
+                "visceral":     visfat_actual,  "delta_visceral": 0,
+                "agua":         agua_actual,    "delta_agua":     0,
+                "proteina":     proteina_corp,
+                "masa_osea":    masa_osea,
+                "bmr":          bmr_actual,
+                "edad_meta":    edad_metabolica,
+                "bmi":          bmi_actual,
+                "fat_free":     fat_free_weight,
+                "alertas":      [a.strip() for a in alertas.split("\n") if a.strip() and "Alertas" not in a and "🚨" not in a] if alertas else [],
+                "estado_mimo":  estado_mimo,
+                "emoji_mimo":   emoji_mimo,
+                "razon_mimo":   razon_mimo,
+                "shadow_mult":  shadow_mult,
+                "razon_siso":   razon_siso,
+                "nuevo_mult":   nuevo_mult,
+                "calorias":     calorias,
+                "proteina_g":   proteina,
+                "carbs_g":      carbs,
+                "grasas_g":     grasas,
+                "analisis_ia":  dieta_html[:800] if dieta_html else "",
+                "dias_plan":    [],  # La IA genera texto libre — días vacíos por ahora
+            }
+
+            ruta_generada = generar_pdf(datos_pdf, ruta_pdf)
+            logging.info(f"📄 PDF generado: {ruta_generada}")
+
+            # Enviar PDF por Telegram
+            if not DRY_RUN:
+                url_doc = f"https://api.telegram.org/bot{env_vars['TELEGRAM_BOT_TOKEN']}/sendDocument"
+                with open(ruta_generada, "rb") as f:
+                    res = requests.post(url_doc, data={
+                        "chat_id": env_vars["TELEGRAM_CHAT_ID"],
+                        "caption": f"📄 Reporte Semanal PDF — {datetime.now(TZ).strftime('%d/%m/%Y')}",
+                    }, files={"document": f}, timeout=30)
+                if res.status_code == 200:
+                    logging.info("📤 PDF enviado por Telegram.")
+                else:
+                    logging.warning(f"No se pudo enviar el PDF: {res.text}")
+        except Exception:
+            logging.error("Error generando/enviando PDF semanal.", exc_info=True)
+
     logging.info("✅ Job semanal ejecutado y notificado exitosamente.")
 
 
