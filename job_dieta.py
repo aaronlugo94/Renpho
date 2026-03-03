@@ -8,6 +8,7 @@ Fixes V5.2:
 """
 
 import os
+import sys
 import sqlite3
 import pandas as pd
 import requests
@@ -15,12 +16,17 @@ import logging
 from datetime import datetime, timedelta
 from pytz import timezone
 from google import genai
+
+# Garantiza que Python busque en el mismo directorio del script
+# — necesario en Railway donde el working directory puede variar
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 try:
     from generar_pdf_semanal import generar_pdf
     PDF_DISPONIBLE = True
-except ImportError:
+except ImportError as e:
     PDF_DISPONIBLE = False
-    logging.warning("generar_pdf_semanal.py no encontrado — PDF desactivado.")
+    logging.warning(f"generar_pdf_semanal.py no encontrado — PDF desactivado. ({e})")
 
 
 # ─── CONFIG ───────────────────────────────────────────────────────────────────
