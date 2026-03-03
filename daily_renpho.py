@@ -577,29 +577,65 @@ def ejecutar_diario() -> bool:
             ).days
             dias_desde_str = f" <i>(vs hace {dias} día{'s' if dias != 1 else ''})</i>"
 
-        # Tendencia en el título
+        # Tendencia — mostrar total 7 días, no por día (evita números alarmantes)
         if tendencia:
+            total_7d = tendencia["peso_tendencia_dia"] * 7
             dir_peso = "📉" if tendencia["peso_tendencia_dia"] < -0.01 else \
                        "📈" if tendencia["peso_tendencia_dia"] > 0.01 else "➡️"
-            tendencia_str = f"  {dir_peso} {tendencia['peso_tendencia_dia']:+.2f} kg/día (7d)"
+            tendencia_str = f"  {dir_peso} {total_7d:+.1f} kg (tendencia 7d)"
         else:
             tendencia_str = ""
+
+        # Contexto del día de semana con tipo de entrenamiento
+        hoy_semana = datetime.now(TZ).weekday()
+        CONTEXTO_DIA = {
+            0: ("Lunes",    "🏋️ Gym — Empuje (pecho, hombros, tríceps)"),
+            1: ("Martes",   "🏠 Casa — Circuito metabólico 30 min (bebé duerme)"),
+            2: ("Miércoles","🏋️ Gym — Tirón (espalda, bíceps, peso muerto)"),
+            3: ("Jueves",   "🏋️ Gym — Pierna (sentadillas, prensa, zancadas)"),
+            4: ("Viernes",  "🏠 Casa — Circuito metabólico 30 min (bebé duerme)"),
+            5: ("Sábado",   "🚶 Recuperación activa — caminata o bici en familia"),
+            6: ("Domingo",  "🔄 Reseteo — día limpio, preparación para la semana"),
+        }
+        dia_nombre, dia_tipo = CONTEXTO_DIA.get(hoy_semana, ("", ""))
+
+        # Macros del día basados en multiplicador actual de la BD
+        try:
+            with sqlite3.connect(DB_PATH) as conn_mac:
+                row = conn_mac.execute(
+                    "SELECT valor FROM config_nutricion WHERE clave='kcal_mult'"
+                ).fetchone()
+                mult_hoy = float(row[0]) if row else 24.0
+        except Exception:
+            mult_hoy = 24.0
+
+        bmr_hoy     = m.get("bmr") or round(m["peso"] * 22)
+        kcal_hoy    = max(round(m["peso"] * mult_hoy), round(bmr_hoy * 1.15))
+        ffm_hoy     = m.get("fat_free_weight") or (m["peso"] * (1 - m["grasa"]/100))
+        prot_hoy    = round(ffm_hoy * 2.2)
+        grasas_hoy  = round(m["peso"] * 0.7)
+        carbs_hoy   = max(0, round((kcal_hoy - (prot_hoy * 4 + grasas_hoy * 9)) / 4))
 
         reporte = (
             f"📊 <b>REPORTE DIARIO — {m['fecha_str']}</b>{dias_desde_str}\n"
             f"{'─' * 30}\n"
             f"🏆 <b>Score Composición:</b> {score}/100 — {desc_score}{tendencia_str}\n\n"
+
+            f"📅 <b>Hoy:</b> {dia_nombre} — {dia_tipo}\n\n"
+
             f"⚖️  <b>Peso:</b>            {m['peso']} kg{d_peso}\n"
             f"💪  <b>Músculo:</b>         {m['musculo_pct']}% ({m['masa_muscular_kg']} kg){d_musc}\n"
             f"🥓  <b>Grasa:</b>           {m['grasa']}%{d_grasa}{clasificar(m['grasa'], 'grasa_hombre')}\n"
             f"🫀  <b>Grasa Visceral:</b>  {m['grasa_visceral']}{d_visc}{clasificar(m['grasa_visceral'], 'visceral')}\n"
             f"💧  <b>Agua:</b>            {m['agua']}%{d_agua}{clasificar(m['agua'], 'agua')}\n"
-            f"🧬  <b>Proteína:</b>        {m['proteina']}%{clasificar(m['proteina'], 'proteina')}\n"
+            f"🧬  <b>Proteína:</b>        {m['proteina']}%{clasificar(m['proteina'], 'proteina') if m.get('proteina') else ''}\n"
             f"🦴  <b>Masa Ósea:</b>       {m['masa_osea']} kg\n"
             f"⚡  <b>BMR:</b>             {m['bmr']} kcal/día\n"
             f"📅  <b>Edad Metabólica:</b> {m['edad_metabolica']} años\n"
             f"📐  <b>BMI:</b>             {m['bmi']}{clasificar(m['bmi'], 'bmi')}\n"
             f"{alertas}"
+            f"\n🎯 <b>Objetivo de hoy:</b>\n"
+            f"Kcal: <b>{kcal_hoy}</b>  |  P: <b>{prot_hoy}g</b>  |  C: <b>{carbs_hoy}g</b>  |  G: <b>{grasas_hoy}g</b>\n"
             f"\n🤖 <b>Análisis IA:</b>\n{analisis}"
         )
 
