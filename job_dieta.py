@@ -590,63 +590,59 @@ def ejecutar_job():
         conn.commit()
         logging.info("💾 Historial persistido en SQLite.")
 
-    # ── Telegram fuera del context manager (DB ya cerrada) ────────────────
-    enviar_telegram(reporte)
-
-    # ── PDF Semanal ───────────────────────────────────────────────────────
+    # ── Solo PDF — sin mensaje de texto en Telegram ───────────────────────
     if PDF_DISPONIBLE:
         try:
-            fecha_str = datetime.now(TZ).strftime("%Y-%m-%d")
-            ruta_pdf  = f"/app/data/reportes/reporte_{fecha_str}.pdf"
+            fecha_str    = datetime.now(TZ).strftime("%Y-%m-%d")
+            ruta_pdf     = f"/app/data/reportes/reporte_{fecha_str}.pdf"
 
             datos_pdf = {
                 "fecha":        datetime.now(TZ).strftime("%d/%m/%Y"),
                 "dias_entre":   dias_entre,
-                "score":        score,
-                "desc_score":   desc_score,
-                "peso":         peso_actual,    "delta_peso":     delta_peso,
-                "grasa":        grasa_actual,   "delta_grasa":    delta_grasa,
-                "musculo":      musculo_actual, "delta_musculo":  delta_musculo,
-                "visceral":     visfat_actual,  "delta_visceral": 0,
-                "agua":         agua_actual,    "delta_agua":     0,
+                "score":        score,       "desc_score":   desc_score,
+                "peso":         peso_actual, "delta_peso":   delta_peso,
+                "grasa":        grasa_actual,"delta_grasa":  delta_grasa,
+                "musculo":      musculo_actual,"delta_musculo":delta_musculo,
+                "visceral":     visfat_actual,"delta_visceral":0,
+                "agua":         agua_actual, "delta_agua":   0,
                 "proteina":     proteina_corp,
                 "masa_osea":    masa_osea,
                 "bmr":          bmr_actual,
                 "edad_meta":    edad_metabolica,
                 "bmi":          bmi_actual,
                 "fat_free":     fat_free_weight,
-                "alertas":      [a.strip() for a in alertas.split("\n") if a.strip() and "Alertas" not in a and "🚨" not in a] if alertas else [],
-                "estado_mimo":  estado_mimo,
-                "emoji_mimo":   emoji_mimo,
-                "razon_mimo":   razon_mimo,
-                "shadow_mult":  shadow_mult,
-                "razon_siso":   razon_siso,
-                "nuevo_mult":   nuevo_mult,
-                "calorias":     calorias,
-                "proteina_g":   proteina,
-                "carbs_g":      carbs,
-                "grasas_g":     grasas,
-                "analisis_ia":  dieta_html[:800] if dieta_html else "",
-                "dias_plan":    [],  # La IA genera texto libre — días vacíos por ahora
+                "alertas":      [a.strip() for a in alertas.split("\n")
+                                 if a.strip() and "Alertas" not in a and "🚨" not in a
+                                ] if alertas else [],
+                "estado_mimo":  estado_mimo, "emoji_mimo":  emoji_mimo,
+                "razon_mimo":   razon_mimo,  "shadow_mult": shadow_mult,
+                "razon_siso":   razon_siso,  "nuevo_mult":  nuevo_mult,
+                "calorias":     calorias,    "proteina_g":  proteina,
+                "carbs_g":      carbs,       "grasas_g":    grasas,
+                "analisis_ia":  dieta_html,
+                "dias_plan":    [],  # Gemini genera texto libre — sin estructura de días
             }
 
-            ruta_generada = generar_pdf(datos_pdf, ruta_pdf)
-            logging.info(f"📄 PDF generado: {ruta_generada}")
+            ruta_gen = generar_pdf(datos_pdf, ruta_pdf)
+            logging.info(f"📄 PDF generado: {ruta_gen}")
 
-            # Enviar PDF por Telegram
             if not DRY_RUN:
                 url_doc = f"https://api.telegram.org/bot{env_vars['TELEGRAM_BOT_TOKEN']}/sendDocument"
-                with open(ruta_generada, "rb") as f:
+                with open(ruta_gen, "rb") as f_pdf:
                     res = requests.post(url_doc, data={
                         "chat_id": env_vars["TELEGRAM_CHAT_ID"],
-                        "caption": f"📄 Reporte Semanal PDF — {datetime.now(TZ).strftime('%d/%m/%Y')}",
-                    }, files={"document": f}, timeout=30)
+                        "caption": f"📊 Reporte Semanal — {datetime.now(TZ).strftime('%d/%m/%Y')}",
+                    }, files={"document": f_pdf}, timeout=30)
                 if res.status_code == 200:
-                    logging.info("📤 PDF enviado por Telegram.")
+                    logging.info("📤 PDF enviado por Telegram correctamente.")
                 else:
-                    logging.warning(f"No se pudo enviar el PDF: {res.text}")
+                    logging.error(f"Error enviando PDF: {res.text}")
         except Exception:
             logging.error("Error generando/enviando PDF semanal.", exc_info=True)
+    else:
+        # Fallback: si no hay generador de PDF, manda el texto
+        enviar_telegram(reporte)
+        logging.warning("PDF no disponible — fallback a Telegram texto.")
 
     logging.info("✅ Job semanal ejecutado y notificado exitosamente.")
 
