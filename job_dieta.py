@@ -216,12 +216,17 @@ def job_ya_ejecutado_hoy(conn: sqlite3.Connection) -> bool:
 
 
 def obtener_datos_semana(conn: sqlite3.Connection) -> pd.DataFrame:
+    """
+    Retorna los últimos 28 días de pesajes.
+    28 días = 4 semanas — necesario para que el SISO calcule
+    tendencia multi-semana en vez de reaccionar a delta puntual.
+    """
     return pd.read_sql_query("""
         SELECT Fecha, Peso_kg, Grasa_Porcentaje,
                COALESCE(Musculo_Pct, Musculo) AS Musculo_Pct,
                FatFreeWeight, Agua, VisFat, BMI, EdadMetabolica, Proteina, MasaOsea, BMR
         FROM pesajes
-        WHERE Fecha >= date('now', '-14 day')
+        WHERE Fecha >= date('now', '-28 day')
         ORDER BY Fecha ASC
     """, conn)
 
@@ -272,35 +277,69 @@ def evaluar_mimo(delta_peso: float, delta_grasa: float, delta_musculo: float, mu
     return estado, mult_seguro, razon
 
 
-def aplicar_siso(delta_peso: float, mult_actual: float, bmr: int = 2000, peso: float = 100) -> tuple:
+def calcular_tendencia_peso(df: pd.DataFrame) -> float | None:
+    """
+    Calcula la tendencia real de pérdida/ganancia de peso usando
+    regresión lineal sobre los últimos 28 días de pesajes.
+    Retorna kg/semana. None si hay menos de 3 puntos de datos.
+
+    Por qué regresión lineal y no delta puntual:
+    - El peso fluctúa 1-2 kg diarios por agua, glucógeno y sodio
+    - Un delta puntual semana-a-semana tiene ~2 kg de ruido
+    - La pendiente de regresión sobre 28 días tiene ~0.2 kg de error
+    - Es la misma técnica que usan Cronometer, MacroFactor y NOOM
+    """
+    if df is None or len(df) < 3:
+        return None
+    import numpy as np
+    x = (df["Fecha"] - df["Fecha"].iloc[0]).dt.days.values
+    y = df["Peso_kg"].astype(float).values
+    # Pendiente en kg/día → convertir a kg/semana
+    pendiente = np.polyfit(x, y, 1)[0]
+    return round(pendiente * 7, 3)
+
+
+def aplicar_siso(tendencia_kg_semana: float | None, mult_actual: float,
+                 bmr: int = 2000, peso: float = 100) -> tuple:
     """
     Ley de control SISO activa — modifica el multiplicador real.
-    Variable de control: delta_peso. Salida: nuevo multiplicador.
-    Piso inteligente: nunca bajar de BMR + 15% de margen de actividad.
+    Variable de control: tendencia de peso en kg/semana (regresión 28 días).
+    Piso inteligente: nunca bajar de BMR × 1.15.
+
+    Umbrales basados en evidencia:
+    - Pérdida >1 kg/semana = demasiado rápido, riesgo de catabolismo muscular
+    - Pérdida 0.25-0.75 kg/semana = zona óptima para cutting con preservación muscular
+    - Pérdida <0.1 kg/semana (o ganancia) = estancamiento real tras 3-4 semanas
+
+    Si tendencia es None (menos de 3 pesajes), no actúa — espera más datos.
     """
-    # Piso dinámico basado en BMR real — nunca menos de BMR+15% dividido por peso
-    piso_calorias = round(bmr * 1.15)  # BMR + 15% mínimo para actividad básica
-    piso_mult     = round(piso_calorias / peso, 1)
-    piso_mult     = max(piso_mult, 21.0)  # Nunca menos de 21 en términos absolutos
+    piso_calorias = round(bmr * 1.15)
+    piso_mult     = max(round(piso_calorias / peso, 1), 21.0)
 
-    if delta_peso < -0.8:
-        nuevo = mult_actual + 1
-        razon = "📉 Pérdida rápida. Aumento multiplicador para proteger músculo."
+    if tendencia_kg_semana is None:
+        razon = "⏳ Datos insuficientes para tendencia multi-semana. Multiplicador mantenido."
+        return mult_actual, razon, False
+
+    if tendencia_kg_semana < -1.0:
+        nuevo  = mult_actual + 1.0
+        razon  = (f"📉 Pérdida demasiado rápida ({tendencia_kg_semana:+.2f} kg/sem, tendencia 28d). "
+                  f"Aumento multiplicador para proteger músculo.")
         cambio = True
-    elif delta_peso > -0.2:
-        nuevo = mult_actual - 1
-        razon = "🛑 Estancamiento. Recorto multiplicador calórico."
-        cambio = True
-    else:
-        nuevo = mult_actual
-        razon = "✅ Progreso óptimo. Multiplicador mantenido."
+    elif tendencia_kg_semana < -0.25:
+        nuevo  = mult_actual
+        razon  = (f"✅ Progreso óptimo ({tendencia_kg_semana:+.2f} kg/sem, tendencia 28d). "
+                  f"Multiplicador mantenido.")
         cambio = False
+    else:
+        nuevo  = mult_actual - 1.0
+        razon  = (f"🛑 Estancamiento real ({tendencia_kg_semana:+.2f} kg/sem, tendencia 28d). "
+                  f"Recorto multiplicador calórico.")
+        cambio = True
 
-    # Aplicar piso dinámico (BMR-based) y techo fijo
     nuevo_seguro = max(piso_mult, min(nuevo, 34.0))
     if nuevo_seguro != nuevo:
         if nuevo < piso_mult:
-            razon += f" (Piso BMR aplicado: mínimo {piso_mult} kcal/kg = {piso_calorias} kcal)"
+            razon += f" (Piso BMR: mínimo {piso_mult} kcal/kg = {piso_calorias} kcal)"
         else:
             razon += f" (Limitado a {nuevo_seguro})"
     return nuevo_seguro, razon, cambio
@@ -550,9 +589,10 @@ def ejecutar_job():
         masa_osea        = float(dato_actual["MasaOsea"]) if dato_actual["MasaOsea"] else None
         bmr_actual       = int(dato_actual["BMR"]) if dato_actual.get("BMR") else round(peso_actual * 22)
 
-        delta_peso    = peso_actual   - float(dato_anterior["Peso_kg"])
-        delta_grasa   = grasa_actual  - float(dato_anterior["Grasa_Porcentaje"])
-        delta_musculo = musculo_actual - float(dato_anterior["Musculo_Pct"])
+        delta_peso     = peso_actual    - float(dato_anterior["Peso_kg"])
+        delta_grasa    = grasa_actual   - float(dato_anterior["Grasa_Porcentaje"])
+        delta_musculo  = musculo_actual - float(dato_anterior["Musculo_Pct"])
+        delta_visceral = visfat_actual  - float(dato_anterior["VisFat"])  # Fix: ya no hardcodeado
 
         # ── Scoring y alertas ─────────────────────────────────────────────────
         score, desc_score = calcular_score_composicion(
@@ -566,6 +606,10 @@ def ejecutar_job():
         # ── Control metabólico ────────────────────────────────────────────────
         mult_actual = obtener_multiplicador(conn)
 
+        # Tendencia de peso 28 días (regresión lineal) — input del SISO
+        tendencia_kg_semana = calcular_tendencia_peso(df)
+        logging.info(f"[TENDENCIA] {tendencia_kg_semana:+.3f} kg/semana (regresión {len(df)} pesajes)")
+
         # MIMO: diagnóstico multi-variable (shadow — no actúa aún)
         estado_mimo, shadow_mult, razon_mimo = evaluar_mimo(
             delta_peso, delta_grasa, delta_musculo, mult_actual
@@ -577,8 +621,10 @@ def ejecutar_job():
             f"Δgrasa={delta_grasa:+.2f} | Δmúsculo={delta_musculo:+.2f}"
         )
 
-        # SISO: control activo mono-variable (actúa sobre el multiplicador real)
-        nuevo_mult, razon_siso, hubo_cambio = aplicar_siso(delta_peso, mult_actual, bmr_actual, peso_actual)
+        # SISO: usa tendencia de 28 días en vez de delta puntual
+        nuevo_mult, razon_siso, hubo_cambio = aplicar_siso(
+            tendencia_kg_semana, mult_actual, bmr_actual, peso_actual
+        )
         if hubo_cambio:
             actualizar_multiplicador(conn, nuevo_mult)
             conn.commit()
@@ -667,8 +713,10 @@ def ejecutar_job():
     # ── Solo PDF — sin mensaje de texto en Telegram ───────────────────────
     if PDF_DISPONIBLE:
         try:
-            fecha_str = datetime.now(TZ).strftime("%Y-%m-%d")
-            ruta_pdf  = f"/app/data/reportes/reporte_{fecha_str}.pdf"
+            fecha_str  = datetime.now(TZ).strftime("%Y-%m-%d")
+            carpeta    = "/app/data/reportes"
+            os.makedirs(carpeta, exist_ok=True)          # Fix: crea carpeta si no existe
+            ruta_pdf   = f"{carpeta}/reporte_{fecha_str}.pdf"
 
             datos_pdf = {
                 "fecha":        datetime.now(TZ).strftime("%d/%m/%Y"),
@@ -677,7 +725,7 @@ def ejecutar_job():
                 "peso":         peso_actual,    "delta_peso":    delta_peso,
                 "grasa":        grasa_actual,   "delta_grasa":   delta_grasa,
                 "musculo":      musculo_actual, "delta_musculo": delta_musculo,
-                "visceral":     visfat_actual,  "delta_visceral":0,
+                "visceral":     visfat_actual,  "delta_visceral":delta_visceral,  # Fix: calculado
                 "agua":         agua_actual,    "delta_agua":    0,
                 "proteina":     proteina_corp,
                 "masa_osea":    masa_osea,
@@ -694,7 +742,7 @@ def ejecutar_job():
                 "calorias":     calorias,       "proteina_g":    proteina,
                 "carbs_g":      carbs,          "grasas_g":      grasas,
                 "analisis_ia":  diagnostico_texto,
-                "dias_plan":    dias_plan,       # ✅ Plan completo con los 7 días
+                "dias_plan":    dias_plan,
             }
 
             ruta_gen = generar_pdf(datos_pdf, ruta_pdf)
