@@ -308,19 +308,46 @@ def aplicar_siso(delta_peso: float, mult_actual: float, bmr: int = 2000, peso: f
 
 # ─── GENERACIÓN DE DIETA ───────────────────────────────────────────────────────
 
+# Estructura JSON esperada de Gemini:
+# {
+#   "diagnostico": "Texto libre de análisis semanal...",
+#   "dias": [
+#     {
+#       "nombre": "LUNES — Día de Ataque 1",
+#       "tipo": "GYM",           // GYM | CASA | FIN DE SEMANA | RESETEO
+#       "subtitulo": "Oficina + Gym 45 min — Empuje",
+#       "comidas": [
+#         { "label": "Desayuno", "texto": "..." },
+#         { "label": "Almuerzo", "texto": "..." },
+#         { "label": "Colacion", "texto": "..." },
+#         { "label": "Cena",     "texto": "..." }
+#       ]
+#     },
+#     ... (7 días)
+#   ]
+# }
+
+FALLBACK_PLAN = {
+    "diagnostico": "Plan de IA no disponible esta semana. Mantén los macros calculados y repite el plan de la semana anterior.",
+    "dias": []
+}
+
 def generar_dieta_ia(
     peso, grasa, visceral, agua, fat_free_weight,
     calorias, proteina, carbs, grasas, bmr,
     delta_peso, delta_grasa, delta_musculo,
     estado_mimo, razon_mimo
-) -> str:
+) -> dict:
     """
-    Genera el plan semanal de nutrición y entrenamiento.
-    GARANTÍA: siempre retorna string, nunca None.
+    Genera el plan semanal de nutrición y entrenamiento en JSON estructurado.
+    Retorna dict con claves 'diagnostico' (str) y 'dias' (list).
+    GARANTÍA: siempre retorna dict válido, nunca None ni excepción.
     """
-    logging.info("🧠 Generando plan semanal con IA...")
+    import json, time
+    logging.info("🧠 Generando plan semanal con IA (JSON estructurado)...")
 
-    prompt = f"""Eres mi nutriólogo deportivo y entrenador personal de alto rendimiento. Diseña un plan completo de 7 días basado en mis datos exactos.
+    prompt = f"""Eres mi nutriólogo deportivo y entrenador personal de alto rendimiento.
+Diseña un plan completo de 7 días basado en mis datos exactos.
 
 PERFIL ACTUAL:
 - Peso: {peso} kg | Grasa: {grasa}% (Visceral: {visceral}) | Agua: {agua}%
@@ -330,34 +357,51 @@ PERFIL ACTUAL:
 
 MACROS DIARIOS CALCULADOS:
 - Calorías: {calorias} kcal | Proteína: {proteina}g | Carbohidratos: {carbs}g | Grasas: {grasas}g
-- ⚠️ LÍMITE MÍNIMO ABSOLUTO: Nunca recomiendes por debajo de {bmr} kcal/día (BMR real).
-  Comer por debajo del BMR destruye el metabolismo y la masa muscular. Es innegociable.
+- LÍMITE MÍNIMO ABSOLUTO: Nunca recomiendes por debajo de {bmr} kcal/día (BMR real).
 
 RESTRICCIONES DE ESTILO DE VIDA (OBLIGATORIAS):
-1. LUNES, MIÉRCOLES, JUEVES (Oficina + Gym pesado):
-   - Salgo a las 4pm, entreno 45 min en gym, ceno a las 6pm
-   - Cenas deben ser muy saciantes y altas en proteína
+1. LUNES, MIÉRCOLES, JUEVES (Oficina + Gym pesado 45 min):
+   - Salgo a las 4pm, entreno en gym, ceno a las 6pm
+   - Cenas muy saciantes y altas en proteína
    - El lonche del día siguiente es SIEMPRE la sobra de la cena anterior
 
-2. MARTES Y VIERNES (Home Office + cuidado del bebé):
+2. MARTES Y VIERNES (Home Office + bebé):
    - Entreno 30 min en casa durante la siesta del bebé
-   - Dame rutina EXACTA de ejercicios para esos 30 minutos en casa
-   - Sin equipamiento pesado (bebé durmiendo)
+   - Incluye rutina EXACTA de ejercicios (sin equipo pesado)
 
-3. FIN DE SEMANA:
-   - Actividad de recuperación activa o tiempo en familia activo
-   - Una comida social permitida (ajusta macros del día)
+3. FIN DE SEMANA: Recuperación activa, una comida social permitida el sábado
 
-4. DESAYUNOS: Ultra-rápidos (menos de 5 minutos), portátiles para comer en el auto
+4. DESAYUNOS: Ultra-rápidos (menos de 5 min), portátiles para el auto
 
-5. COLACIÓN DIARIA: Incluye siempre 1 colación basada en frutas frescas para controlar antojos, ajustando la cena para no exceder calorías
+5. COLACIÓN: 1 colación de fruta fresca cada día
 
-6. HIDRATACIÓN: Sugiere consumo de agua específico basado en mi agua corporal actual ({agua}%)
+6. HIDRATACIÓN: Objetivo específico basado en agua corporal actual ({agua}%)
 
-REGLA ABSOLUTA DE FORMATO:
-Usa ÚNICAMENTE etiquetas <b> e <i> para resaltar texto.
-Usa saltos de línea reales y guiones (-) para listas.
-PROHIBIDO usar <br>, <hr>, <ul>, <li>, <h1>, <h2>, <h3>, <p> o cualquier otra etiqueta HTML."""
+INSTRUCCIÓN DE FORMATO — MUY IMPORTANTE:
+Responde ÚNICAMENTE con un objeto JSON válido. Sin texto antes ni después. Sin bloques markdown. Sin comillas de código.
+El JSON debe tener exactamente esta estructura:
+
+{{
+  "diagnostico": "Párrafo de análisis de la semana y filosofía del plan. Texto libre, sin HTML.",
+  "dias": [
+    {{
+      "nombre": "LUNES — Día de Ataque 1",
+      "tipo": "GYM",
+      "subtitulo": "Oficina + Gym 45 min — Empuje",
+      "comidas": [
+        {{"label": "Desayuno", "texto": "descripción concreta del desayuno"}},
+        {{"label": "Almuerzo",  "texto": "descripción concreta del almuerzo"}},
+        {{"label": "Colacion",  "texto": "descripción de la colación"}},
+        {{"label": "Cena",      "texto": "descripción concreta de la cena"}}
+      ]
+    }},
+    ... 6 días más (Martes, Miércoles, Jueves, Viernes, Sábado, Domingo)
+  ]
+}}
+
+Tipos válidos para el campo "tipo": GYM, CASA, FIN DE SEMANA, RESETEO
+Para MARTES y VIERNES agrega una comida extra con label "Rutina" describiendo el circuito exacto.
+El array "dias" debe tener exactamente 7 elementos (Lunes a Domingo)."""
 
     for intento in range(3):
         try:
@@ -366,15 +410,38 @@ PROHIBIDO usar <br>, <hr>, <ul>, <li>, <h1>, <h2>, <h3>, <p> o cualquier otra et
                 model="gemini-2.5-pro", contents=prompt
             )
             texto = respuesta.text.strip() if respuesta and respuesta.text else ""
-            if texto:
-                return texto
-            logging.warning(f"Intento {intento + 1}: Gemini devolvió respuesta vacía.")
+            if not texto:
+                logging.warning(f"Intento {intento + 1}: Gemini devolvió respuesta vacía.")
+                continue
+
+            # Limpiar posibles bloques markdown que Gemini agrega a veces
+            texto = texto.strip()
+            if texto.startswith("```"):
+                texto = texto.split("\n", 1)[-1]  # quitar primera línea ```json
+                texto = texto.rsplit("```", 1)[0]  # quitar cierre ```
+                texto = texto.strip()
+
+            plan = json.loads(texto)
+
+            # Validar estructura mínima
+            if "diagnostico" not in plan or "dias" not in plan:
+                logging.warning(f"Intento {intento + 1}: JSON sin claves requeridas.")
+                continue
+            if not isinstance(plan["dias"], list) or len(plan["dias"]) < 7:
+                logging.warning(f"Intento {intento + 1}: dias tiene {len(plan.get('dias',[]))} elementos, se esperaban 7.")
+                continue
+
+            logging.info(f"✅ Plan JSON generado correctamente ({len(plan['dias'])} días).")
+            return plan
+
+        except json.JSONDecodeError as e:
+            logging.warning(f"Intento {intento + 1}: JSON inválido — {e}")
         except Exception as e:
             logging.warning(f"Intento {intento + 1} fallido: {e}")
-            import time; time.sleep(2)
+        time.sleep(2)
 
-    logging.error("Gemini falló tras 3 intentos.")
-    return "<i>⚠️ Plan de IA no disponible. Mantén los macros calculados y el plan de la semana anterior.</i>"
+    logging.error("Gemini falló tras 3 intentos — usando plan fallback.")
+    return FALLBACK_PLAN
 
 
 # ─── TELEGRAM ─────────────────────────────────────────────────────────────────
@@ -524,16 +591,21 @@ def ejecutar_job():
         carbs    = max(0, round((calorias - (proteina * 4 + grasas * 9)) / 4))
 
         # ── Generación del plan ───────────────────────────────────────────────
-        dieta_html = generar_dieta_ia(
+        plan_ia = generar_dieta_ia(
             peso_actual, grasa_actual, visfat_actual, agua_actual, fat_free_weight,
             calorias, proteina, carbs, grasas, bmr_actual,
             delta_peso, delta_grasa, delta_musculo,
             estado_mimo, razon_mimo,
         )
+        diagnostico_texto = plan_ia.get("diagnostico", "")
+        dias_plan         = plan_ia.get("dias", [])
 
-        # ── Construcción del reporte ──────────────────────────────────────────
+        # Serializar para guardar en SQLite (campo heredado dieta_html)
+        import json as _json
+        dieta_json_str = _json.dumps(plan_ia, ensure_ascii=False)
+
+        # ── Construcción del reporte Telegram (fallback) ──────────────────────
         def delta_str(val, invert=False):
-            """Mini helper para formatear deltas con semáforo."""
             if abs(val) < 0.05: return f"({val:+.2f}) ⚪"
             if invert: emoji = "🟢" if val < 0 else "🔴"
             else:      emoji = "🟢" if val > 0 else "🔴"
@@ -541,47 +613,43 @@ def ejecutar_job():
 
         masa_osea_str = f" | Masa Ósea: {masa_osea} kg" if masa_osea else ""
 
+        # Construir texto plano del plan para el fallback de Telegram
+        plan_texto = ""
+        if dias_plan:
+            for dia in dias_plan:
+                plan_texto += f"\n<b>{dia.get('nombre','')}</b> — {dia.get('subtitulo','')}\n"
+                for c in dia.get("comidas", []):
+                    plan_texto += f"  <b>{c.get('label','')}:</b> {c.get('texto','')}\n"
+        else:
+            plan_texto = diagnostico_texto
+
         reporte = (
-            f"🤖 <b>CONTROL METABÓLICO V5.0 — {datetime.now(TZ).strftime('%d/%m/%Y')}</b>\n"
+            f"🤖 <b>CONTROL METABÓLICO V5.2 — {datetime.now(TZ).strftime('%d/%m/%Y')}</b>\n"
             f"<i>Comparativa vs hace {dias_entre} días</i>\n"
             f"{'─' * 32}\n\n"
-
-            f"🏆 <b>Score de Composición:</b> {score}/100 — {desc_score}\n\n"
-
-            f"📊 <b>Telemetría Semanal:</b>\n"
-            f"⚖️  Peso:      {peso_actual:.1f} kg  {delta_str(delta_peso, invert=True)}\n"
-            f"🥓  Grasa:     {grasa_actual:.1f}%   {delta_str(delta_grasa, invert=True)}{clasificar(grasa_actual, 'grasa_hombre')}\n"
-            f"💪  Músculo:   {musculo_actual:.1f}%  {delta_str(delta_musculo)}\n"
-            f"🫀  Visceral:  {visfat_actual}{clasificar(visfat_actual, 'visceral')}\n"
-            f"💧  Agua:      {agua_actual:.1f}%{clasificar(agua_actual, 'agua')}\n"
-            f"🧬  Proteína:  {proteina_corp}%{clasificar(proteina_corp, 'proteina') if proteina_corp else ''}\n"
-            f"📐  BMI:       {bmi_actual}{clasificar(bmi_actual, 'bmi') if bmi_actual else ''}\n"
-            f"📅  Ed. Metab: {edad_metabolica} años{masa_osea_str}\n"
-            f"🔩  FFM:       {fat_free_weight:.1f} kg\n"
+            f"🏆 <b>Score:</b> {score}/100 — {desc_score}\n\n"
+            f"📊 <b>Telemetría:</b>\n"
+            f"⚖️  Peso:     {peso_actual:.1f} kg  {delta_str(delta_peso, invert=True)}\n"
+            f"🥓  Grasa:    {grasa_actual:.1f}%   {delta_str(delta_grasa, invert=True)}{clasificar(grasa_actual, 'grasa_hombre')}\n"
+            f"💪  Músculo:  {musculo_actual:.1f}%  {delta_str(delta_musculo)}\n"
+            f"🫀  Visceral: {visfat_actual}{clasificar(visfat_actual, 'visceral')}\n"
+            f"💧  Agua:     {agua_actual:.1f}%{clasificar(agua_actual, 'agua')}\n"
+            f"🧬  Proteína: {proteina_corp}%{clasificar(proteina_corp, 'proteina') if proteina_corp else ''}\n"
+            f"📐  BMI:      {bmi_actual}{clasificar(bmi_actual, 'bmi') if bmi_actual else ''}\n"
+            f"📅  Ed.Met:   {edad_metabolica} años{masa_osea_str}\n"
+            f"🔩  FFM:      {fat_free_weight:.1f} kg\n"
             f"{alertas}\n"
-
             f"{'─' * 32}\n"
-            f"🧠 <b>Diagnóstico MIMO:</b> {emoji_mimo} <b>{estado_mimo}</b>\n"
-            f"<i>{razon_mimo}</i>\n"
-            f"<i>Consejo: {consejo_mimo}</i>\n"
-            f"Mult. MIMO sugerido: <b>{shadow_mult}</b> kcal/kg\n\n"
-
-            f"⚙️ <b>Control SISO (Activo):</b>\n"
-            f"<i>{razon_siso}</i>\n"
-            f"Multiplicador aplicado: <b>{nuevo_mult}</b> kcal/kg\n\n"
-
+            f"🧠 <b>MIMO:</b> {emoji_mimo} {estado_mimo} — {razon_mimo}\n"
+            f"⚙️ <b>SISO:</b> {razon_siso}\n"
+            f"Multiplicador: <b>{nuevo_mult} kcal/kg</b>\n\n"
+            f"🎯 <b>Macros:</b> {calorias} kcal | P:{proteina}g | C:{carbs}g | G:{grasas}g\n\n"
             f"{'─' * 32}\n"
-            f"🎯 <b>Macros Bio-Ajustados:</b>\n"
-            f"Kcal: <b>{calorias}</b>  |  P: <b>{proteina}g</b>  |  C: <b>{carbs}g</b>  |  G: <b>{grasas}g</b>\n\n"
-
-            f"{'─' * 32}\n"
-            f"🥗 <b>TU PLAN SEMANAL:</b>\n\n{dieta_html}"
+            f"📋 <b>DIAGNÓSTICO:</b>\n{diagnostico_texto}\n\n"
+            f"🥗 <b>PLAN SEMANAL:</b>\n{plan_texto}"
         )
 
-        # ── Persistencia PRIMERO, Telegram DESPUÉS ────────────────────────────
-        # Regla: si falla el INSERT, el job no queda marcado como ejecutado
-        # y el cron reintentará. Si mandamos Telegram primero y falla el INSERT,
-        # recibes el mensaje pero el job vuelve a correr la próxima hora.
+        # ── Persistencia ──────────────────────────────────────────────────────
         conn.execute("""
             INSERT INTO historico_dietas
             (fecha, peso, grasa, delta_peso, kcal_mult, calorias,
@@ -591,7 +659,7 @@ def ejecutar_job():
             datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
             peso_actual, grasa_actual, delta_peso, nuevo_mult,
             calorias, proteina, carbs, grasas,
-            dieta_html, estado_mimo, shadow_mult, score,
+            dieta_json_str, estado_mimo, shadow_mult, score,
         ))
         conn.commit()
         logging.info("💾 Historial persistido en SQLite.")
@@ -599,18 +667,18 @@ def ejecutar_job():
     # ── Solo PDF — sin mensaje de texto en Telegram ───────────────────────
     if PDF_DISPONIBLE:
         try:
-            fecha_str    = datetime.now(TZ).strftime("%Y-%m-%d")
-            ruta_pdf     = f"/app/data/reportes/reporte_{fecha_str}.pdf"
+            fecha_str = datetime.now(TZ).strftime("%Y-%m-%d")
+            ruta_pdf  = f"/app/data/reportes/reporte_{fecha_str}.pdf"
 
             datos_pdf = {
                 "fecha":        datetime.now(TZ).strftime("%d/%m/%Y"),
                 "dias_entre":   dias_entre,
-                "score":        score,       "desc_score":   desc_score,
-                "peso":         peso_actual, "delta_peso":   delta_peso,
-                "grasa":        grasa_actual,"delta_grasa":  delta_grasa,
-                "musculo":      musculo_actual,"delta_musculo":delta_musculo,
-                "visceral":     visfat_actual,"delta_visceral":0,
-                "agua":         agua_actual, "delta_agua":   0,
+                "score":        score,          "desc_score":    desc_score,
+                "peso":         peso_actual,    "delta_peso":    delta_peso,
+                "grasa":        grasa_actual,   "delta_grasa":   delta_grasa,
+                "musculo":      musculo_actual, "delta_musculo": delta_musculo,
+                "visceral":     visfat_actual,  "delta_visceral":0,
+                "agua":         agua_actual,    "delta_agua":    0,
                 "proteina":     proteina_corp,
                 "masa_osea":    masa_osea,
                 "bmr":          bmr_actual,
@@ -620,13 +688,13 @@ def ejecutar_job():
                 "alertas":      [a.strip() for a in alertas.split("\n")
                                  if a.strip() and "Alertas" not in a and "🚨" not in a
                                 ] if alertas else [],
-                "estado_mimo":  estado_mimo, "emoji_mimo":  emoji_mimo,
-                "razon_mimo":   razon_mimo,  "shadow_mult": shadow_mult,
-                "razon_siso":   razon_siso,  "nuevo_mult":  nuevo_mult,
-                "calorias":     calorias,    "proteina_g":  proteina,
-                "carbs_g":      carbs,       "grasas_g":    grasas,
-                "analisis_ia":  dieta_html,
-                "dias_plan":    [],  # Gemini genera texto libre — sin estructura de días
+                "estado_mimo":  estado_mimo,    "emoji_mimo":    emoji_mimo,
+                "razon_mimo":   razon_mimo,     "shadow_mult":   shadow_mult,
+                "razon_siso":   razon_siso,     "nuevo_mult":    nuevo_mult,
+                "calorias":     calorias,       "proteina_g":    proteina,
+                "carbs_g":      carbs,          "grasas_g":      grasas,
+                "analisis_ia":  diagnostico_texto,
+                "dias_plan":    dias_plan,       # ✅ Plan completo con los 7 días
             }
 
             ruta_gen = generar_pdf(datos_pdf, ruta_pdf)
@@ -646,7 +714,7 @@ def ejecutar_job():
         except Exception:
             logging.error("Error generando/enviando PDF semanal.", exc_info=True)
     else:
-        # Fallback: si no hay generador de PDF, manda el texto
+        # Fallback: si no hay generador de PDF, manda el texto por Telegram
         enviar_telegram(reporte)
         logging.warning("PDF no disponible — fallback a Telegram texto.")
 
