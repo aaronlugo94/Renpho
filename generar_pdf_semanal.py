@@ -1,6 +1,6 @@
 """
 generar_pdf_semanal.py — V3.0
-Diseño claro profesional y bonito— compatible con todos los visores de PDF.
+Diseño claro profesional — compatible con todos los visores de PDF.
 """
 
 import os
@@ -134,24 +134,26 @@ def fmt_d(v, inv=False):
 def pagina_1(d, story):
     fecha = d.get("fecha","")
     dias  = d.get("dias_entre",7)
-
-    # BLOQUE HERO — score + macros sobre fondo blanco con borde azul
-    sc   = d.get("score", 0)
-    desc = d.get("desc_score","")
-    kcal = d.get("calorias", 0)
-    pg   = d.get("proteina_g", 0)
-    cg   = d.get("carbs_g", 0)
-    gg   = d.get("grasas_g", 0)
+    sc    = d.get("score", 0)
+    desc  = d.get("desc_score","")
+    kcal  = d.get("calorias", 0)
+    pg    = d.get("proteina_g", 0)
+    cg    = d.get("carbs_g", 0)
+    gg    = d.get("grasas_g", 0)
+    bmr_h = d.get("bmr", 2000)
+    TDEE_FACTOR = 1.45
+    tdee_h = round(bmr_h * TDEE_FACTOR)
 
     col_s = C_VERDE if sc>=75 else C_AMARILLO if sc>=50 else C_NARANJA if sc>=25 else C_ROJO
     hx_s  = col_s.hexval()[2:]
 
+    # ── SCORE ────────────────────────────────────────────────────────────────
     blk_score = Table([
-        [Paragraph("SCORE SEMANAL", S["sec"])],
-        [Paragraph(f'<font color="#{hx_s}"><b>{sc}</b></font><font size=16 color="#475569">/100</font>', S["score_n"])],
+        [Paragraph("SCORE DE COMPOSICIÓN CORPORAL", S["sec"])],
+        [Paragraph(f'<font color="#{hx_s}"><b>{sc}</b></font><font size=14 color="#475569">/100</font>', S["score_n"])],
         [Paragraph(desc, S["score_d"])],
-        [Paragraph(f'<font color="#475569" size=8>vs {dias} días atrás</font>', S["score_d"])],
-    ], colWidths=[52*mm])
+        [Paragraph(f'<font color="#64748b" size=7>Comparativa vs hace {dias} días</font>', S["score_d"])],
+    ], colWidths=[56*mm])
     blk_score.setStyle(TableStyle([
         ("BACKGROUND",    (0,0),(-1,-1), C_ACENTO_BG),
         ("TOPPADDING",    (0,0),(-1,-1), 8),
@@ -160,39 +162,66 @@ def pagina_1(d, story):
         ("BOX",           (0,0),(-1,-1), 1.5, C_ACENTO),
     ]))
 
-    def bm(num, u, lab, col):
-        hx = col.hexval()[2:]
-        bg = C_VERDE_BG if col==C_VERDE else C_ROJO_BG if col==C_ROJO else C_AMARILLO_BG if col==C_AMARILLO else C_ACENTO_BG
-        t = Table([
-            [Paragraph(f'<font color="#{hx}"><b>{num}</b></font><font size=8 color="#475569"> {u}</font>', S["macro_n"])],
-            [Paragraph(lab, S["macro_l"])],
-        ], colWidths=[28*mm])
-        t.setStyle(TableStyle([
-            ("BACKGROUND",(0,0),(-1,-1), bg),
-            ("TOPPADDING",(0,0),(-1,-1),10),("BOTTOMPADDING",(0,0),(-1,-1),10),
-            ("BOX",(0,0),(-1,-1),0.5,C_BORDE),("ALIGN",(0,0),(-1,-1),"CENTER"),
-        ]))
-        return t
+    # ── MACROS — con etiqueta descriptiva ────────────────────────────────────
+    deficit_h = kcal - tdee_h
+    hx_def = (C_VERDE if deficit_h < -50 else C_AMARILLO if abs(deficit_h) <= 50 else C_NARANJA).hexval()[2:]
+    def_lbl = f"{deficit_h:+,} kcal déficit/día" if deficit_h < 0 else f"+{deficit_h:,} kcal superávit/día"
 
-    t_mac = Table([[bm(kcal,"kcal","CALORÍAS",C_ACENTO),
-                    bm(pg,"g","PROTEÍNA",C_VERDE),
-                    bm(cg,"g","CARBOS",C_AMARILLO),
-                    bm(gg,"g","GRASAS",C_NARANJA)]],
-                  colWidths=[28*mm]*4)
-    t_mac.setStyle(TableStyle([
-        ("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),0),
-        ("TOPPADDING",(0,0),(-1,-1),0),("BOTTOMPADDING",(0,0),(-1,-1),0),
-        ("INNERGRID",(0,0),(-1,-1),3,C_BLANCO),
+    def kpi(titulo, subtitulo, valor, unidad, color, bg):
+        hx = color.hexval()[2:]
+        return Table([
+            [Paragraph(titulo,   E(f"kt{titulo}", fontSize=6,  fontName="Helvetica-Bold",
+                                   textColor=color, alignment=TA_CENTER))],
+            [Paragraph(f'<font color="#{hx}"><b>{valor}</b></font>'
+                       f'<font size=8 color="#64748b"> {unidad}</font>', S["macro_n"])],
+            [Paragraph(subtitulo, E(f"ks{titulo}", fontSize=6, textColor=C_TEXTO2,
+                                    alignment=TA_CENTER, leading=8))],
+        ], colWidths=[28*mm], rowHeights=[10, 22, 16])
+    t_kpis = Table([[
+        kpi("INGESTA DIARIA",    "Lo que vas a comer",    kcal, "kcal", C_ACENTO,   C_ACENTO_BG),
+        kpi("PROTEÍNA",          "Para conservar músculo", pg,  "g",    C_VERDE,    C_VERDE_BG),
+        kpi("CARBOHIDRATOS",     "Energía y rendimiento",  cg,  "g",    C_AMARILLO, C_AMARILLO_BG),
+        kpi("GRASAS",            "Hormonas y saciedad",    gg,  "g",    C_NARANJA,  C_AMARILLO_BG),
+    ]], colWidths=[28*mm]*4)
+    t_kpis.setStyle(TableStyle([
+        ("LEFTPADDING", (0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),0),
+        ("TOPPADDING",  (0,0),(-1,-1),0),("BOTTOMPADDING",(0,0),(-1,-1),0),
+        ("INNERGRID",   (0,0),(-1,-1),3, C_BLANCO),
     ]))
 
-    t_hero = Table([[blk_score, t_mac]], colWidths=[54*mm, 118*mm])
+    # Fila de contexto bajo los KPIs
+    t_ctx = Table([[
+        Paragraph(f'<font size=7 color="#64748b">BMR: <b>{bmr_h:,} kcal</b> (metabolismo basal)  ·  '
+                  f'TDEE estimado: <b>{tdee_h:,} kcal</b> (con tu actividad)  ·  '
+                  f'<font color="#{hx_def}"><b>{def_lbl}</b></font></font>', 
+                  E("ctx", fontSize=7, textColor=C_TEXTO2, alignment=TA_CENTER)),
+    ]], colWidths=[112*mm])
+    t_ctx.setStyle(TableStyle([
+        ("BACKGROUND",    (0,0),(-1,-1), C_FONDO),
+        ("TOPPADDING",    (0,0),(-1,-1), 5),("BOTTOMPADDING",(0,0),(-1,-1),5),
+        ("LEFTPADDING",   (0,0),(-1,-1), 6),("RIGHTPADDING", (0,0),(-1,-1),6),
+        ("BOX",           (0,0),(-1,-1), 0.5, C_BORDE),
+    ]))
+
+    blk_macros = Table([
+        [t_kpis],
+        [t_ctx],
+    ], colWidths=[112*mm])
+    blk_macros.setStyle(TableStyle([
+        ("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),0),
+        ("TOPPADDING",(0,0),(-1,-1),0),("BOTTOMPADDING",(0,0),(-1,-1),0),
+        ("INNERGRID",(0,0),(-1,-1),2,C_BLANCO),
+    ]))
+
+    t_hero = Table([[blk_score, blk_macros]], colWidths=[58*mm, 114*mm])
     t_hero.setStyle(TableStyle([
         ("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),0),
         ("TOPPADDING",(0,0),(-1,-1),0),("BOTTOMPADDING",(0,0),(-1,-1),0),
-        ("INNERGRID",(0,0),(-1,-1),4,C_BLANCO),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
+        ("INNERGRID",(0,0),(-1,-1),4,C_BLANCO),
+        ("VALIGN",(0,0),(-1,-1),"MIDDLE"),
     ]))
     story.append(t_hero)
-    story.append(Spacer(1, 5*mm))
+    story.append(Spacer(1, 4*mm))
 
     # TELEMETRÍA
     story.append(Paragraph("TELEMETRÍA CORPORAL", S["sec"]))
@@ -239,7 +268,7 @@ def pagina_1(d, story):
         ("BOX",           (0,0),(-1,-1), 0.5, C_BORDE),
     ]))
     story.append(t_tel)
-    story.append(Spacer(1, 5*mm))
+    story.append(Spacer(1, 4*mm))
 
     # ALERTAS
     alertas = d.get("alertas", [])
@@ -256,7 +285,7 @@ def pagina_1(d, story):
             ("LINEBELOW",     (0,0),(-1,-2), 0.3, colors.HexColor("#fecaca")),
         ]))
         story.append(t_a)
-        story.append(Spacer(1, 5*mm))
+        story.append(Spacer(1, 4*mm))
 
     # CONTROL METABÓLICO
     story.append(Paragraph("CONTROL METABÓLICO AUTÓNOMO", S["sec"]))
@@ -277,7 +306,7 @@ def pagina_1(d, story):
             [Paragraph("MIMO — DIAGNÓSTICO", S["sec"])],
             [Paragraph(f'<font color="#{hcm}"><b>{em}</b></font>', S["mimo_e"])],
             [Paragraph(rm, S["mimo_r"])],
-            [Paragraph(f'Sugerido: <font color="#{hcm}"><b>{sm} kcal/kg</b></font>', S["mimo_r"])],
+            [Paragraph(f'Mult. sugerido: <font color="#{hcm}"><b>{sm} kcal/kg</b></font>', S["mimo_r"])],
         ], colWidths=[83*mm]),
         Table([
             [Paragraph("SISO — CONTROL ACTIVO", S["sec"])],
@@ -300,7 +329,112 @@ def pagina_1(d, story):
 
 # ─── PÁGINA 2+ ────────────────────────────────────────────────────────────────
 def pagina_2(d, story):
+    from datetime import date, timedelta
+
     story.append(PageBreak())
+
+    # ── META Y PROYECCIÓN ────────────────────────────────────────────────────
+    bmr      = d.get("bmr", 2000)
+    kcal_ing = d.get("calorias", 0)
+    peso_act = d.get("peso", 0)
+    tend_sem = d.get("tendencia_kg_semana")
+    meta_kg  = d.get("meta_kg", 100)
+    peso_ini = d.get("peso_inicio", 120)
+    TDEE_F   = 1.45
+
+    tdee    = round(bmr * TDEE_F)
+    deficit = kcal_ing - tdee
+    faltan  = round(peso_act - meta_kg, 1)
+
+    if tend_sem and tend_sem < -0.05:
+        sem_act = round(faltan / abs(tend_sem), 1)
+        fecha_act = (date.today() + timedelta(weeks=sem_act)).strftime("%b %Y")
+    else:
+        sem_act   = None
+        fecha_act = "calculando..."
+
+    sem_opt   = round(faltan / 0.5, 1)
+    fecha_opt = (date.today() + timedelta(weeks=sem_opt)).strftime("%b %Y")
+    tend_str  = f"{tend_sem:+.2f} kg/sem" if tend_sem else "calculando..."
+
+    cd   = C_VERDE if deficit < -50 else C_AMARILLO if abs(deficit) <= 50 else C_NARANJA
+    hcd  = cd.hexval()[2:]
+    d_lb = "DÉFICIT" if deficit < 0 else "SUPERÁVIT"
+    d_vl = f"{deficit:+,} kcal/día"
+
+    # Barra de progreso
+    rango    = max(peso_ini - meta_kg, 1)
+    progreso = min(max((peso_ini - peso_act) / rango, 0), 1)
+    bar_w    = 172*mm
+    prog_px  = max(progreso * bar_w, 1)
+    rest_px  = bar_w - prog_px
+
+    story.append(Paragraph("META Y PROYECCIÓN", S["sec"]))
+
+    t_etiq = Table([[
+        Paragraph(f'<b>{peso_ini} kg</b>', E("pi2", fontSize=8, textColor=C_TEXTO2)),
+        Paragraph(f'◀ <b>{peso_act} kg</b> hoy — faltan <b>{faltan} kg</b>', E("pa2", fontSize=8, textColor=C_ACENTO, alignment=TA_CENTER)),
+        Paragraph(f'🏁 meta: <b>{meta_kg} kg</b>', E("pm2", fontSize=8, textColor=C_VERDE, alignment=TA_RIGHT)),
+    ]], colWidths=[40*mm, 92*mm, 40*mm])
+    t_etiq.setStyle(TableStyle([
+        ("TOPPADDING",(0,0),(-1,-1),3),("BOTTOMPADDING",(0,0),(-1,-1),2),
+        ("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),0),
+    ]))
+    story.append(t_etiq)
+
+    t_bar = Table([[""  ,""]], colWidths=[prog_px, rest_px])
+    t_bar.setStyle(TableStyle([
+        ("BACKGROUND",(0,0),(0,-1), C_ACENTO),
+        ("BACKGROUND",(1,0),(1,-1), C_BORDE),
+        ("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6),
+        ("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),0),
+    ]))
+    story.append(t_bar)
+    story.append(Spacer(1, 4*mm))
+
+    # Tablas energía y proyección — una debajo de la otra (sin columnas paralelas)
+    def fep(label, valor, nota):
+        return [Paragraph(label, S["mlab"]),
+                Paragraph(valor, S["mval"]),
+                Paragraph(nota,  E("fn", fontSize=7, textColor=C_TEXTO2))]
+
+    t_en = Table([
+        [Paragraph("BALANCE ENERGÉTICO DIARIO", S["sec"]), "", ""],
+        fep("BMR — metabolismo basal",     f"<b>{bmr:,} kcal</b>",    "Lo que gastas en reposo absoluto"),
+        fep("TDEE — gasto real estimado",  f"<b>{tdee:,} kcal</b>",   f"BMR × {TDEE_F} — incluye tu actividad diaria"),
+        fep("Ingesta objetivo",            f"<b>{kcal_ing:,} kcal</b>","Lo que debes comer cada día esta semana"),
+        fep(d_lb,  f'<font color="#{hcd}"><b>{d_vl}</b></font>',       "Ingesta − TDEE (negativo = déficit)"),
+    ], colWidths=[68*mm, 32*mm, 72*mm])
+    t_en.setStyle(TableStyle([
+        ("SPAN",          (0,0),(2,0)),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1), [C_BLANCO, C_FONDO, C_BLANCO, C_ACENTO_BG]),
+        ("TOPPADDING",    (0,0),(-1,-1), 7), ("BOTTOMPADDING",(0,0),(-1,-1),7),
+        ("LEFTPADDING",   (0,0),(-1,-1), 10),("RIGHTPADDING", (0,0),(-1,-1),8),
+        ("LINEBELOW",     (0,1),(-1,3),  0.3, C_BORDE),
+        ("BOX",           (0,0),(-1,-1), 0.5, C_BORDE),
+        ("VALIGN",        (0,0),(-1,-1), "MIDDLE"),
+    ]))
+    story.append(t_en)
+    story.append(Spacer(1, 3*mm))
+
+    t_pr = Table([
+        [Paragraph(f"PROYECCIÓN A META — {meta_kg} kg", S["sec"]), "", ""],
+        fep("Ritmo actual (tendencia 28d)",    f"<b>{tend_str}</b>",      "Calculado por regresión lineal"),
+        fep("Llegada a meta a ritmo actual",   f"<b>{fecha_act}</b>",     f"~{sem_act} semanas" if sem_act else "Necesitas más datos"),
+        fep("Ritmo óptimo recomendado",        "<b>−0.5 kg/sem</b>",      "Máximo para preservar músculo"),
+        fep("Llegada a meta a ritmo óptimo",   f"<b>{fecha_opt}</b>",     f"~{sem_opt:.0f} semanas desde hoy"),
+    ], colWidths=[68*mm, 32*mm, 72*mm])
+    t_pr.setStyle(TableStyle([
+        ("SPAN",          (0,0),(2,0)),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1), [C_BLANCO, C_FONDO, C_BLANCO, C_VERDE_BG]),
+        ("TOPPADDING",    (0,0),(-1,-1), 7), ("BOTTOMPADDING",(0,0),(-1,-1),7),
+        ("LEFTPADDING",   (0,0),(-1,-1), 10),("RIGHTPADDING", (0,0),(-1,-1),8),
+        ("LINEBELOW",     (0,1),(-1,3),  0.3, C_BORDE),
+        ("BOX",           (0,0),(-1,-1), 0.5, C_BORDE),
+        ("VALIGN",        (0,0),(-1,-1), "MIDDLE"),
+    ]))
+    story.append(t_pr)
+    story.append(Spacer(1, 5*mm))
     story.append(Paragraph("PLAN SEMANAL — NUTRICIÓN Y ENTRENAMIENTO", S["sec"]))
     story.append(hr(C_ACENTO, 1.5))
     story.append(Spacer(1, 4*mm))
