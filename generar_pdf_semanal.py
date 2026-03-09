@@ -1,6 +1,6 @@
 """
 generar_pdf_semanal.py — V3.0
-Diseño claro profesional — compatible con todos los visores de PDF.
+Diseño claro profesional y bonito— compatible con todos los visores de PDF.
 """
 
 import os
