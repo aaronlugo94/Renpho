@@ -470,7 +470,11 @@ El array "dias" debe tener exactamente 7 elementos (Lunes a Domingo)."""
                 logging.warning(f"Intento {intento + 1}: dias tiene {len(plan.get('dias',[]))} elementos, se esperaban 7.")
                 continue
 
-            logging.info(f"✅ Plan JSON generado correctamente ({len(plan['dias'])} días).")
+            n_dias = len(plan['dias'])
+            logging.info(f"✅ Plan JSON generado correctamente ({n_dias} días).")
+            if n_dias < 7:
+                logging.warning(f"⚠️ Gemini generó solo {n_dias}/7 días — reintentando.")
+                continue
             return plan
 
         except json.JSONDecodeError as e:
@@ -743,6 +747,9 @@ def ejecutar_job():
                 "carbs_g":      carbs,          "grasas_g":      grasas,
                 "analisis_ia":  diagnostico_texto,
                 "dias_plan":    dias_plan,
+                "meta_kg":      100,           # peso objetivo Aaron
+                "peso_inicio":  120,           # peso de referencia inicial (aprox inicio del proceso)
+                "tendencia_kg_semana": tendencia_kg_semana,
             }
 
             ruta_gen = generar_pdf(datos_pdf, ruta_pdf)
