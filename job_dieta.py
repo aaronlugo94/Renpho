@@ -223,7 +223,7 @@ def obtener_datos_semana(conn: sqlite3.Connection) -> pd.DataFrame:
     """
     return pd.read_sql_query("""
         SELECT Fecha, Peso_kg, Grasa_Porcentaje,
-               COALESCE(Musculo_Pct, Musculo) AS Musculo_Pct,
+               Musculo_Pct,
                FatFreeWeight, Agua, VisFat, BMI, EdadMetabolica, Proteina, MasaOsea, BMR
         FROM pesajes
         WHERE Fecha >= date('now', '-28 day')
