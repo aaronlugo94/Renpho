@@ -31,8 +31,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Servir el dashboard estático en /
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# Servir archivos estáticos — solo si la carpeta existe
+if os.path.isdir(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -103,9 +104,12 @@ def semaforo(val, metrica: str) -> str:
 
 @app.get("/")
 def index():
-    """Redirige al dashboard."""
-    from fastapi.responses import FileResponse
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    """Sirve el dashboard o confirma que la API está viva."""
+    from fastapi.responses import FileResponse, HTMLResponse
+    idx = os.path.join(STATIC_DIR, "index.html")
+    if os.path.exists(idx):
+        return FileResponse(idx)
+    return HTMLResponse("<h2>API Control Metabólico</h2><p><a href='/api/dashboard'>GET /api/dashboard</a></p>")
 
 
 @app.get("/api/dashboard")
