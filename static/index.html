@@ -248,7 +248,7 @@
 </div>
 
 <script>
-const API = '';  // mismo origen
+const API = 'https://web-production-67501.up.railway.app';
 let _data = null;
 let _charts = {};
 
@@ -582,7 +582,7 @@ function renderPlan(d) {
 
 // ── RENDER REPORTES ───────────────────────────────────────────────────────────
 async function loadReportes() {
-  const res = await fetch('/api/reportes');
+  const res = await fetch(API + '/api/reportes');
   const data = await res.json();
   const rows = data.reportes || [];
   if (!rows.length) {
@@ -615,7 +615,7 @@ async function loadReportes() {
 // ── INIT ──────────────────────────────────────────────────────────────────────
 async function init() {
   try {
-    const res  = await fetch('/api/dashboard');
+    const res  = await fetch(API + '/api/dashboard');
     if (!res.ok) throw new Error('API no disponible');
     _data = await res.json();
 
