@@ -276,9 +276,25 @@
 
     <!-- PROGRESO -->
     <div id="sec-progreso" class="section">
-      <div class="card">
-        <div class="cl">Evolución de peso y grasa</div>
-        <div style="position:relative;height:280px;"><canvas id="progresoChart"></canvas></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div class="card">
+          <div class="cl">Grasa corporal <span style="color:var(--green);font-size:9px;margin-left:4px">— meta 22%</span></div>
+          <div style="position:relative;height:200px;"><canvas id="chartGrasa"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="cl">Peso (kg) <span style="color:var(--text3);font-size:9px;margin-left:4px">— con tendencia</span></div>
+          <div style="position:relative;height:200px;"><canvas id="chartPeso"></canvas></div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="card">
+          <div class="cl">Músculo esquelético (%)</div>
+          <div style="position:relative;height:200px;"><canvas id="chartMusculo"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="cl">Agua corporal <span style="color:var(--blue);font-size:9px;margin-left:4px">— meta 53%</span></div>
+          <div style="position:relative;height:200px;"><canvas id="chartAgua"></canvas></div>
+        </div>
       </div>
     </div>
 
@@ -533,16 +549,33 @@ function renderDash(d) {
 
   document.getElementById('dash-content').innerHTML = html;
 
-  // Plan de hoy — primer día del plan
+  // Plan de hoy — detectar día de la semana actual
   const planHoy = document.getElementById('plan-hoy');
-  const hoy = d.dias_plan && d.dias_plan[0];
-  if (hoy) {
-    const colores = { 'Desayuno':'alm','Colación 1':'col','Almuerzo':'alm','Colación 2':'col','Cena':'cen','Rutina':'col' };
-    planHoy.innerHTML = hoy.comidas.map(c =>
+  const DIAS_ES = ['DOMINGO','LUNES','MARTES','MIÉRCOLES','JUEVES','VIERNES','SÁBADO'];
+  const hoyNombre = DIAS_ES[new Date().getDay()];
+  // Buscar el día que corresponde a hoy en el plan
+  const diaHoy = d.dias_plan && d.dias_plan.find(dia =>
+    dia.nombre.toUpperCase().includes(hoyNombre)
+  );
+  const diaAMostrar = diaHoy || (d.dias_plan && d.dias_plan[0]);
+  if (diaAMostrar) {
+    const colores = { 'Desayuno':'alm','Colación 1':'col','Colacion':'col','Almuerzo':'alm',
+                      'Colación 2':'col','Cena':'cen','Rutina':'col' };
+    const TIPO_CLS = {'GYM':'gym','CASA':'col','FIN DE SEMANA':'alm','RESETEO':'alm'};
+    document.querySelector('.cl + .plan-grid') && null;
+    // Actualizar título
+    const planTitle = document.querySelector('#sec-dashboard .cl:last-of-type');
+    planHoy.innerHTML = diaAMostrar.comidas.map(c =>
       `<div class="pmeal">
         <div class="pmeal-h ${colores[c.label] || 'alm'}">${c.label}</div>
         <div class="pmeal-b">${c.texto}</div>
       </div>`).join('');
+    // Actualizar subtítulo del bloque
+    const planCard = planHoy.closest('.card');
+    if (planCard) {
+      const cl = planCard.querySelector('.cl');
+      if (cl) cl.innerHTML = `Plan de hoy — <span style="color:var(--blue)">${diaAMostrar.nombre}</span>`;
+    }
   } else {
     planHoy.innerHTML = '<div style="font-size:11px;color:var(--text2);grid-column:1/-1">Plan no disponible. Se genera cada domingo.</div>';
   }
@@ -571,32 +604,95 @@ function renderDash(d) {
 }
 
 // ── RENDER PROGRESO ───────────────────────────────────────────────────────────
-function renderProgreso(d) {
-  const gr = d.grafica;
-  const ctx = document.getElementById('progresoChart');
-  if (!ctx || !gr.labels.length) return;
-  if (_charts.prog) _charts.prog.destroy();
-  _charts.prog = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: gr.labels.map(l => l.slice(5)),
-      datasets: [
-        { label: 'Peso (kg)', data: gr.pesos, borderColor: '#185FA5', backgroundColor: 'rgba(24,95,165,0.06)',
-          pointRadius: 2, borderWidth: 1.5, tension: 0.3, fill: true, yAxisID: 'y' },
-        { label: 'Grasa (%)', data: gr.grasas, borderColor: '#E24B4A', backgroundColor: 'rgba(226,75,74,0.04)',
-          pointRadius: 2, borderWidth: 1.5, tension: 0.3, fill: false, yAxisID: 'y2' }
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: true, labels: { font: { size: 11 }, boxWidth: 10 } } },
-      scales: {
-        y:  { position: 'left',  ticks: { font:{size:10}, color:'#185FA5', callback: v => v+' kg' }, grid:{color:'rgba(0,0,0,0.04)'} },
-        y2: { position: 'right', ticks: { font:{size:10}, color:'#E24B4A', callback: v => v+'%'  }, grid:{display:false} },
-        x:  { ticks: { font:{size:10}, color:'#888', maxRotation:0, maxTicksLimit:8 }, grid:{display:false} }
-      }
+async function renderProgreso(d) {
+  // Pedir datos de historial con más detalle
+  let hist = d.grafica;
+  try {
+    const res = await fetch(API + '/api/historial?dias=90');
+    const data = await res.json();
+    if (data.datos && data.datos.length) {
+      hist = {
+        labels:  data.datos.map(r => r.Fecha.slice(5)),
+        pesos:   data.datos.map(r => r.Peso_kg),
+        grasas:  data.datos.map(r => r.Grasa_Porcentaje),
+        musculos:data.datos.map(r => r.Musculo_Pct),
+        aguas:   data.datos.map(r => r.Agua),
+      };
     }
-  });
+  } catch(e) {}
+
+  const labels = hist.labels || [];
+  const isDark = document.body.classList.contains('dark');
+  const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+  const tickColor = isDark ? '#64748b' : '#888';
+
+  function makeChart(id, data, color, metaVal, metaLabel, unit, minPad) {
+    const ctx = document.getElementById(id);
+    if (!ctx) return;
+    if (_charts[id]) _charts[id].destroy();
+
+    const min = Math.min(...data.filter(Boolean)) - (minPad || 1);
+    const max = Math.max(...data.filter(Boolean)) + (minPad || 1);
+
+    // Calcular tendencia lineal
+    const n = data.length;
+    let trendData = null;
+    if (n >= 3) {
+      const xs = data.map((_, i) => i);
+      const sumX = xs.reduce((a,b) => a+b, 0);
+      const sumY = data.reduce((a,b) => a+(b||0), 0);
+      const sumXY = xs.reduce((s,x,i) => s + x*(data[i]||0), 0);
+      const sumX2 = xs.reduce((s,x) => s + x*x, 0);
+      const slope = (n*sumXY - sumX*sumY) / (n*sumX2 - sumX*sumX);
+      const intercept = (sumY - slope*sumX) / n;
+      trendData = xs.map(x => Math.round((slope*x + intercept)*10)/10);
+    }
+
+    const datasets = [{
+      data, borderColor: color,
+      backgroundColor: color.replace(')', ',0.06)').replace('rgb', 'rgba'),
+      pointRadius: 2.5, borderWidth: 1.5, tension: 0.3, fill: true, label: unit
+    }];
+
+    if (trendData) datasets.push({
+      data: trendData, borderColor: color,
+      borderDash: [4,3], borderWidth: 1, pointRadius: 0,
+      fill: false, label: 'Tendencia'
+    });
+
+    const annotations = {};
+    if (metaVal) annotations.meta = {
+      type: 'line', yMin: metaVal, yMax: metaVal,
+      borderColor: '#3B6D11', borderWidth: 1.5,
+      borderDash: [6,3],
+      label: { content: metaLabel, display: true, position: 'end',
+               font: { size: 9 }, color: '#3B6D11', backgroundColor: 'transparent' }
+    };
+
+    _charts[id] = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: v => v.raw + ' ' + unit } }
+        },
+        scales: {
+          y: { min: Math.floor(min), max: Math.ceil(max),
+               ticks: { font:{size:10}, color: tickColor, callback: v => v+unit },
+               grid: { color: gridColor } },
+          x: { ticks: { font:{size:10}, color: tickColor, maxRotation:0, maxTicksLimit:7 },
+               grid: { display:false } }
+        }
+      }
+    });
+  }
+
+  makeChart('chartGrasa',   hist.grasas  || [],  '#E24B4A', 22,   'Meta 22%', '%',   0.5);
+  makeChart('chartPeso',    hist.pesos   || [],  '#185FA5', null, null,        ' kg', 0.5);
+  makeChart('chartMusculo', hist.musculos|| [],  '#7c3aed', null, null,        '%',   0.3);
+  makeChart('chartAgua',    hist.aguas   || [],  '#0ea5e9', 53,   'Meta 53%', '%',   0.5);
 }
 
 // ── RENDER PLAN ───────────────────────────────────────────────────────────────
@@ -680,6 +776,21 @@ async function init() {
 }
 
 init();
+
+// ── AUTO-REFRESH cada 5 minutos ───────────────────────────────────────────────
+setInterval(async () => {
+  try {
+    const res = await fetch(API + '/api/dashboard');
+    if (!res.ok) return;
+    _data = await res.json();
+    document.getElementById('sync-time').textContent = _data.sync || '—';
+    // Solo re-render si estamos en dashboard
+    if (document.getElementById('sec-dashboard').classList.contains('on')) {
+      if (_charts.weight) { _charts.weight.destroy(); _charts.weight = null; }
+      renderDash(_data);
+    }
+  } catch(e) {}
+}, 5 * 60 * 1000);
 
 // ── DARK MODE ─────────────────────────────────────────────────────────────────
 function toggleDark() {
