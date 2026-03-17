@@ -167,6 +167,47 @@
   /* SECTIONS */
   .section { display: none; }
   .section.on { display: block; }
+
+  /* DARK MODE */
+  body.dark {
+    --bg:      #0f172a;
+    --surface: #1e293b;
+    --surface2:#334155;
+    --border:  #334155;
+    --text:    #f1f5f9;
+    --text2:   #94a3b8;
+    --text3:   #64748b;
+    --blue:    #60a5fa;
+    --blue-bg: #1e3a5f;
+    --green:   #86efac;
+    --green-bg:#14532d;
+    --red:     #fca5a5;
+    --red-bg:  #7f1d1d;
+    --amber:   #fcd34d;
+    --amber-bg:#78350f;
+  }
+  body.dark .al { color: #fca5a5; }
+  body.dark .al-amber { color: #fcd34d; }
+  body.dark .badge.b-red { background: #7f1d1d; color: #fca5a5; }
+  body.dark .badge.b-amber { background: #78350f; color: #fcd34d; }
+  body.dark .badge.b-green { background: #14532d; color: #86efac; }
+  body.dark .status-pill.pill-red { background: #7f1d1d; color: #fca5a5; }
+  body.dark .status-pill.pill-amber { background: #78350f; color: #fcd34d; }
+  body.dark .status-pill.pill-green { background: #14532d; color: #86efac; }
+  body.dark .rpill-g { background: #14532d; color: #86efac; }
+  body.dark .rpill-b { background: #1e3a5f; color: #60a5fa; }
+  body.dark .rpill-a { background: #78350f; color: #fcd34d; }
+  body.dark .rpill-r { background: #7f1d1d; color: #fca5a5; }
+
+  .dark-toggle {
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-size: 11px; color: var(--text2); padding: 5px 10px;
+    border-radius: var(--r); border: 1px solid var(--border);
+    background: var(--surface); transition: background .15s;
+  }
+  .dark-toggle:hover { background: var(--surface2); }
+  .toggle-icon { font-size: 14px; }
+
 </style>
 </head>
 <body>
@@ -219,7 +260,13 @@
   <div class="main">
     <div class="topbar">
       <div class="pg-t" id="pg-title">Dashboard</div>
-      <div class="chip" id="fecha-hoy">—</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="dark-toggle" onclick="toggleDark()" id="dark-btn">
+          <span class="toggle-icon">🌙</span>
+          <span id="dark-label">Oscuro</span>
+        </div>
+        <div class="chip" id="fecha-hoy">—</div>
+      </div>
     </div>
 
     <!-- DASHBOARD -->
@@ -633,6 +680,29 @@ async function init() {
 }
 
 init();
+
+// ── DARK MODE ─────────────────────────────────────────────────────────────────
+function toggleDark() {
+  const body = document.body;
+  const isDark = body.classList.toggle('dark');
+  localStorage.setItem('darkMode', isDark);
+  document.getElementById('dark-label').textContent = isDark ? 'Claro' : 'Oscuro';
+  document.querySelector('.toggle-icon').textContent = isDark ? '☀️' : '🌙';
+  // Redibujar charts con nuevos colores
+  if (_data) {
+    if (_charts.weight) { _charts.weight.destroy(); _charts.weight = null; }
+    if (_charts.prog)   { _charts.prog.destroy();   _charts.prog = null; }
+    renderDash(_data);
+  }
+}
+
+// Restaurar preferencia guardada
+if (localStorage.getItem('darkMode') === 'true') {
+  document.body.classList.add('dark');
+  document.getElementById('dark-label') && (document.getElementById('dark-label').textContent = 'Claro');
+  document.querySelector && document.querySelector('.toggle-icon') && (document.querySelector('.toggle-icon').textContent = '☀️');
+}
+
 </script>
 </body>
 </html>
