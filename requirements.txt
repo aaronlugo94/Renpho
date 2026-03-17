@@ -5,3 +5,5 @@ Renpho-api
 google-genai
 reportlab
 numpy
+fastapi
+uvicorn[standard]
